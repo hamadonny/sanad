@@ -36,3 +36,37 @@ first (`dependsOn: ["^build"]`).
 
 The mobile app starts in Arabic (RTL) even on an English device; the user switches in onboarding
 or settings. Full `I18nManager.forceRTL` + reload handling lands in Phase 3.
+
+## D-005 — Ledger model (Phase 1)
+
+- Entries are signed: **debit > 0, credit < 0**; every transaction sums to zero.
+- Two sides that must each balance inside every transaction:
+  - **Cash** — `gateway_clearing` (all money held) vs. who it belongs to: `circle_pot:*`,
+    `entry_fees_held:*`, `guarantee_fund`, `holdbacks_payable`, `refunds_payable`,
+    `platform_revenue`, `charity_payable`. This makes "money in = money out + fund + payables"
+    true by construction.
+  - **Claims** (memo) — `member_receivable:*` and `losses` vs. `receivables_control` and
+    `recoveries`. Tracks what defaulters owe without pretending it is money.
+- The ledger refuses any transaction that debits `guarantee_fund` unless its type is a fund
+  outflow (advance, completion/defaulter refund, revenue release, reversal) — the fund cannot
+  pay operating costs.
+- Transaction types added to the spec's list: `ENTRY_FEE_TRANSFERRED` (held → fund at draw),
+  `FUND_ADVANCE_REPAID`, `POT_RETURNED` (vacant spot's pot → fund), `REFUND_PAID`,
+  `CLAIM_CANCELLED` (pre-payout defaulter's advances become vacancy cover), `REVERSAL`.
+
+## D-006 — Engine shape (Phase 1)
+
+- `applyCircleEvent(state, event, config)` is a pure reducer returning
+  `{ state, transactions, effects }`. Idempotency keys are deterministic
+  (`{circleId}:{type}:{…}`), so re-running a job re-posts identical transactions (no-ops).
+- Contributions are tracked **per spot**, not per member, so a spot that changes hands
+  (replacement) still collects exactly N × M.
+- Revenue release at closing = `entryFees − completionRefunds − (lossesCovered − recoveries −
+forfeitedHoldbacks)`, floored at 0 — the engine also checks it equals the circle's net fund
+  movement and throws if not.
+- Interpretations (flagged to the founder):
+  - Anti-sniping: a bid in the last 5 min moves that spot's end to **end + 5 min**.
+  - Replacement allowed while `spot − monthsAlreadyPaidOut ≥ replacementCutoffMonths`
+    (Example 4: spot 8, 6 months paid out → allowed).
+  - Bids are capped at Pot − the bidder's holdback, so a payout can never go negative.
+  - Pre-payout default penalty (0% by default) goes to charity by default (configurable).

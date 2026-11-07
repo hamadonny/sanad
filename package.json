@@ -19,7 +19,8 @@
     "format:check": "prettier --check .",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
-    "clean": "turbo run clean"
+    "clean": "turbo run clean",
+    "simulate": "pnpm --filter @sanad/core simulate"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

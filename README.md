@@ -68,13 +68,31 @@ curl http://localhost:3000/health
 phone and computer must be on the same Wi-Fi. When the app starts calling the API (Phase 3), set
 `EXPO_PUBLIC_API_URL` in `.env` to your computer's LAN IP, e.g. `http://192.168.1.20:3000`.
 
+## Financial engine (packages/core)
+
+Every money rule lives here as pure functions, tested against the spec's worked examples (§5.14)
+and 300 random circles per test run (property tests). Main entry points:
+
+- `applyCircleEvent(state, event, config)` — the circle lifecycle reducer (FORMING → CLOSED).
+- `Ledger` — double-entry ledger with idempotency keys and a guard that stops the Guarantee
+  Fund paying for anything except advances, refunds and revenue release.
+- `placeBid` / `publicView` — priority auction; `runDraw` / `verifyDraw` — provably fair draw.
+- `computeTier`, `joinBlockers`, `minimumReserve`, `nextBreakerState` — risk controls.
+- `simulate` — Monte Carlo of a pool of circles (`pnpm simulate`).
+
+```bash
+pnpm simulate -- --sanity --post-default 0.1   # expect ≈ 450 KWD loss per circle
+pnpm simulate -- --runs 500 --circles 36 --post-default 0.03 --recovery 0.3
+PROPERTY_RUNS=3000 pnpm --filter @sanad/core test   # heavier property test run
+```
+
 ## Build phases
 
 | Phase | Scope                                                   | Status  |
 | ----- | ------------------------------------------------------- | ------- |
 | 0     | Monorepo, tooling, Docker Compose, CI, empty apps       | ✅ Done |
-| 1     | Core financial engine + config + ledger + simulation    | Next    |
-| 2     | API (auth, KYC mock, circles, auction, draw, payments…) |         |
+| 1     | Core financial engine + config + ledger + simulation    | ✅ Done |
+| 2     | API (auth, KYC mock, circles, auction, draw, payments…) | Next    |
 | 3     | Mobile app screens (ar + en)                            |         |
 | 4     | Admin dashboard                                         |         |
 | 5     | Contracts, PDFs, legal case files                       |         |
