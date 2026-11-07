@@ -1,0 +1,29 @@
+{
+  "name": "@sanad/admin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Sanad admin dashboard (Next.js App Router).",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@sanad/config": "workspace:*",
+    "@sanad/core": "workspace:*",
+    "@sanad/i18n": "workspace:*",
+    "@sanad/ui-tokens": "workspace:*",
+    "next": "^16.4.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
+  }
+}

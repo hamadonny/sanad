@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+.expo/
+.turbo/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+apps/mobile/android/
+apps/mobile/ios/
+*.tar.gz
