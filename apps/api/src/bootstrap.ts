@@ -11,6 +11,15 @@ export function configureApp(app: INestApplication): void {
   (app.getHttpAdapter().getInstance() as Express).set('json replacer', bigintReplacer);
   (app.getHttpAdapter().getInstance() as Express).set('trust proxy', 1);
   app.enableShutdownHooks();
+  // Browsers only: the admin dashboard and the mobile web preview. Native apps don't use CORS.
+  const origins = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  app.enableCors({
+    origin: origins.length > 0 ? origins : process.env.NODE_ENV !== 'production',
+    credentials: false,
+  });
 }
 
 export function openApiDocument(app: INestApplication): OpenAPIObject {

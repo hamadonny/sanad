@@ -1,0 +1,42 @@
+appId: kw.sanad.app
+name: Bid on a priority spot, pay a contribution, receive the payout
+# Uses a seeded member of the demo AUCTION circle (phones +96550000062…71).
+env:
+  LOCAL: '50000063'
+---
+- launchApp:
+    clearState: true
+- runFlow:
+    file: subflow-login.yaml
+- tapOn: { id: notifications-later, optional: true }
+- tapOn:
+    id: 'circle-card-q'
+- tapOn: { id: go-auction }
+- tapOn: { id: bid-spot-3 }
+- assertVisible: { id: bid-preview }
+- tapOn: { id: bid-confirm }
+- assertVisible: 'أنت الأعلى'
+# Close the auction + draw, then go to the first due date.
+- runScript:
+    file: scripts/advance.js
+    env: { DAYS: '3' }
+- runScript:
+    file: scripts/advance.js
+    env: { DAYS: '10' }
+- back
+- back
+- scrollUntilVisible:
+    element: { id: pay-next }
+- tapOn: { id: pay-next }
+- tapOn: { id: payment-confirm }
+- extendedWaitUntil:
+    visible: { id: payment-success }
+    timeout: 15000
+- tapOn: { id: payment-done }
+# Spot 3 receives in month 3: jump past its payout date.
+- runScript:
+    file: scripts/advance.js
+    env: { DAYS: '75' }
+- assertVisible: { id: expected-payout }
+- runScript:
+    file: scripts/reset-clock.js

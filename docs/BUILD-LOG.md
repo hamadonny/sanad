@@ -35,7 +35,7 @@ Working rule: stop after each phase for founder approval.
 4. Bid cap: currently only Pot − holdback. Want a lower maximum?
 5. Pre-payout default penalty destination (default charity) [LEGAL][SHARIAH].
 
-## Phase 2 — API ✅ (2026-11-07) — awaiting approval
+## Phase 2 — API ✅ (2026-11-07) — approved
 
 - NestJS 12 + Postgres (Drizzle, D-007) + BullMQ/Redis. 30 tables (spec §13), append-only and balance triggers.
 - Auth: Kuwait phone OTP (hashed, 5-min, 5 attempts, 5/hour), 15-min JWT + rotating refresh with reuse detection. Admin: scrypt password + mandatory TOTP, RBAC for the 6 roles, audit log (identity reads audited).
@@ -55,4 +55,18 @@ Working rule: stop after each phase for founder approval.
 1. Hosting/data residency [DECISION][LEGAL] still open — needed before Phase 7, not before Phase 3.
 2. Response schemas in OpenAPI are untyped for now; Phase 3 adds response DTOs as screens need them.
 
-## Next: Phase 3 — Mobile app (spec §9)
+## Phase 3 — Mobile app ✅ (2026-11-08) — awaiting approval
+
+- All §9.1 screens in Arabic + English: onboarding (language, 4 slides, phone + OTP, KYC with camera, notification permission), home (circle cards, guarantee banner, upcoming payout), join (amounts with lock reasons, calculator, refund by spot, random/priority, agreement, fee), auction (live bids, countdown, preview of payout, confirmation, switch warning), circle detail (timeline with first name + initial, my payments, pay / pay ahead, leave during FORMING), verify draw (on-device), payments + PDF receipts, profile (tier progress, on-time rate, language, Arabic-Indic numerals, Hijri dates, biometric lock, delete account blocked while in a circle), support (FAQ, WhatsApp/call, ticket), notifications.
+- Biometric lock on open/resume and before payments and bids; keychain token storage; push registration; offline cache + banner; accessibility labels; dynamic type limits.
+- Typed client `SanadApi` with response types enforced on the API (D-010). `/me` adds on-time rate.
+- Tests: 9 component/screen tests (Jest + RNTL) + 5 logic tests (Vitest); Maestro flows for onboarding → join → bid → pay → receive (not run in CI — need a simulator).
+- Verified end to end in a browser build against the seeded API (Arabic RTL and English): sign-in, pay a late month, verify draw, bid.
+
+### Open questions raised in Phase 3
+
+1. Brand: colours, fonts and app icon are still placeholders [DECISION NEEDED].
+2. Support WhatsApp / phone numbers (EXPO_PUBLIC_SUPPORT_WHATSAPP / _PHONE).
+3. Push delivery needs an Expo (EAS) project id and APNs/FCM keys — set up in Phase 6 with store accounts.
+
+## Next: Phase 4 — Admin dashboard (spec §10)

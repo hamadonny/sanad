@@ -108,3 +108,27 @@ hand-written file with append-only and balance triggers).
 5. Pre-payout default penalty (0% by default) stays routed to charity. [LEGAL][SHARIAH]
 6. New config `circle.firstDueAfterDrawDays` (default 7): first due date is 7 days after the
    draw, so members are not asked to pay on the day spots are announced.
+
+## D-010 — Typed responses shared by API and clients (Phase 3)
+
+`packages/api-client/src/responses.ts` defines every response shape the apps use. The API's
+services are annotated with these types (type-only import), so a change on either side fails
+the typecheck. `SanadApi` (hand-written) adds bearer tokens, single-flight refresh on 401,
+Idempotency-Key on money endpoints and typed `ApiError`s. The OpenAPI-generated `paths` stay
+available for request typing and documentation.
+
+## D-011 — Mobile architecture (Phase 3)
+
+- Expo Router screens in `apps/mobile/src/app`; TanStack Query for server state (persisted to
+  AsyncStorage for offline reads); Zustand for settings; tokens in SecureStore (keychain).
+- RTL: Arabic default. Root view sets `direction`, so layout is right even where the native RTL
+  flag can't change (Expo Go). Native builds also `forceRTL` and reload on language change.
+  `left`/`right` always mean physical sides; logical spacing uses start/end.
+- Every money action goes through one PaymentSheet: the server creates the intent first, the
+  member sees the server's exact amounts (3 decimals, late penalty to charity shown
+  separately), confirms with biometrics, then pays. Mock gateway until Phase 7.
+- Bids show "you will receive X KWD in month N" computed from the server's pot and the
+  member's holdback, before confirmation.
+- Draw verification runs @sanad/core `verifyDraw` on the phone.
+- API: CORS enabled for browsers in development (admin dashboard, web preview); production
+  uses `CORS_ORIGINS`.

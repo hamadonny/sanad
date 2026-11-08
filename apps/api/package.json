@@ -24,6 +24,7 @@
     "@nestjs/platform-express": "^12.4.0",
     "@nestjs/swagger": "^12.1.1",
     "@nestjs/throttler": "^6.7.1",
+    "@sanad/api-client": "workspace:*",
     "@sanad/config": "workspace:*",
     "@sanad/core": "workspace:*",
     "@sanad/i18n": "workspace:*",

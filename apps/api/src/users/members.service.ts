@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { MeResponse } from '@sanad/api-client';
 import { computeTier, type TrustProfile } from '@sanad/core';
 import { and, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { conflict, notFound } from '../common/errors.js';
@@ -49,7 +50,17 @@ export class MembersService {
     return row?.n ?? 0;
   }
 
-  async me(userId: string) {
+  /** Share of paid installments paid within the grace period (null before the first payment). */
+  async onTimeRate(userId: string, graceDays: number): Promise<number | null> {
+    const r = await this.dbs.db.execute(sql`
+      SELECT count(*)::int AS paid,
+             count(*) FILTER (WHERE (paid_at AT TIME ZONE 'Asia/Kuwait')::date <= due_date + ${graceDays}::int)::int AS on_time
+      FROM installments WHERE user_id = ${userId} AND paid_at IS NOT NULL`);
+    const row = r.rows[0] as { paid: number; on_time: number } | undefined;
+    return row && row.paid > 0 ? row.on_time / row.paid : null;
+  }
+
+  async me(userId: string): Promise<MeResponse> {
     const u = await this.user(userId);
     const profile = await this.trustProfile(userId);
     const { config } = await this.settings.active();
@@ -65,9 +76,11 @@ export class MembersService {
       fullNameAr: u.fullNameAr,
       fullNameEn: u.fullNameEn,
       civilIdExpiry: u.civilIdExpiry,
+      onTimeRate: await this.onTimeRate(userId, config.contributions.gracePeriodDays),
+      inOpenCircle: (await this.activeCircleCount(userId)) > 0,
       trust: {
         ...profile,
-        tier: tier.kind === 'tier' ? tier.tier : null,
+        tier: tier.kind === 'tier' ? (tier.tier as 0 | 1 | 2) : null,
         banned: tier.kind === 'banned',
         nextTier: next
           ? {

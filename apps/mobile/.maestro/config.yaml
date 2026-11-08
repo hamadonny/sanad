@@ -1,0 +1,11 @@
+# Maestro E2E (spec §17): onboarding → join → bid → pay → receive.
+# Needs: API running with DEV_ENDPOINTS=true and seeded (pnpm --filter @sanad/api db:seed),
+# and the app installed on a simulator/emulator (development build or Expo Go).
+#   maestro test apps/mobile/.maestro -e API_URL=http://10.0.2.2:3000   # Android emulator
+#   maestro test apps/mobile/.maestro -e API_URL=http://localhost:3000  # iOS simulator
+flows:
+  - '01-*.yaml'
+  - '02-*.yaml'
+  - '03-*.yaml'
+executionOrder:
+  continueOnFailure: false

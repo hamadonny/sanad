@@ -1,0 +1,32 @@
+appId: kw.sanad.app
+name: Onboarding — language, slides, phone + OTP, identity, notifications
+env:
+  LOCAL: '60009001'
+---
+- launchApp:
+    clearState: true
+- runFlow:
+    file: subflow-login.yaml
+- extendedWaitUntil:
+    visible:
+      id: kyc-fullNameAr
+    timeout: 15000
+- tapOn: { id: kyc-fullNameAr }
+- inputText: 'سارة الكندري'
+- tapOn: { id: kyc-fullNameEn }
+- inputText: 'Sara Alkandari'
+- tapOn: { id: kyc-civilIdNumber }
+- inputText: '290123456789'
+- tapOn: { id: kyc-dateOfBirth }
+- inputText: '1992-03-14'
+- tapOn: { id: kyc-civilIdExpiry }
+- inputText: '2031-03-14'
+- tapOn: { id: kyc-address }
+- inputText: 'Salmiya, Block 10'
+- hideKeyboard
+- scrollUntilVisible:
+    element: { id: kyc-submit }
+- tapOn: { id: kyc-submit }
+- tapOn: { id: kyc-continue }
+- tapOn: { id: notifications-later }
+- assertVisible: { id: guarantee-banner }

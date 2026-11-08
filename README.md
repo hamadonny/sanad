@@ -68,6 +68,35 @@ curl http://localhost:3000/health
 phone and computer must be on the same Wi-Fi. When the app starts calling the API (Phase 3), set
 `EXPO_PUBLIC_API_URL` in `.env` to your computer's LAN IP, e.g. `http://192.168.1.20:3000`.
 
+## Mobile app (apps/mobile)
+
+Expo SDK 58 + Expo Router. Arabic (RTL) first, English second. Talks to the API with the typed
+client in `packages/api-client`.
+
+```bash
+pnpm dev:api        # in one terminal (Docker running, DB migrated + seeded)
+pnpm dev:mobile     # in another — scan the QR code with Expo Go
+```
+
+The app finds the API automatically at `http://<your computer's IP>:3000` (the same machine as
+the Expo dev server). Set `EXPO_PUBLIC_API_URL` to override. Allow Node through the Windows
+firewall the first time.
+
+Try it with a seeded member: phone `50000052` (ACTIVE circle) or `50000063` (circle in its
+auction). The OTP is at `http://localhost:3000/dev/sms?phone=%2B96550000052`.
+Payments use the **mock gateway**: the confirmation sheet's Pay button simulates the gateway.
+
+- Screens: onboarding (language, slides, phone + OTP, identity with camera, notifications),
+  home, join (calculator, random/priority, agreement, fee), auction, circle detail
+  (timeline, my payments, pay / pay ahead), on-device draw verification, payments + receipts,
+  profile (tier, on-time rate, language, Arabic-Indic numerals, Hijri dates, biometric lock,
+  delete account), support (FAQ, WhatsApp/call, ticket), notifications.
+- Face ID / fingerprint lock on open and before every payment or bid. Tokens in the keychain.
+- Offline: the last data is cached and shown with an offline banner.
+- `pnpm --filter @sanad/mobile web` opens a browser preview (developer convenience only).
+- Tests: `pnpm --filter @sanad/mobile test` (Vitest for logic, Jest + RNTL for screens).
+  E2E flows for Maestro live in `apps/mobile/.maestro` (see `config.yaml`).
+
 ## API (apps/api)
 
 NestJS + PostgreSQL (Drizzle ORM) + BullMQ/Redis. Interactive docs at

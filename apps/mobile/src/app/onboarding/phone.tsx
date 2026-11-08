@@ -1,0 +1,68 @@
+import { zodResolver } from '@hookform/resolvers/zod';
+import { router, Stack } from 'expo-router';
+import { useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
+import { useTranslation } from 'react-i18next';
+import { z } from 'zod';
+import { Button, Field, Screen, T } from '../../components/ui';
+import { api } from '../../lib/api';
+import { errorMessage } from '../../lib/errors';
+import { normalizeKuwaitPhone } from '../../lib/format';
+import { useDir } from '../../lib/i18n';
+
+export default function PhoneScreen() {
+  const { t } = useTranslation();
+  const { language } = useDir();
+  const [error, setError] = useState<string | null>(null);
+  const schema = z.object({
+    phone: z.string().refine((v) => normalizeKuwaitPhone(v) !== null, t('onboarding.phoneInvalid')),
+  });
+  const { control, handleSubmit, formState } = useForm<{ phone: string }>({
+    resolver: zodResolver(schema),
+    defaultValues: { phone: '' },
+  });
+
+  const submit = handleSubmit(async ({ phone }) => {
+    setError(null);
+    const normalized = normalizeKuwaitPhone(phone) as string;
+    try {
+      await api.requestOtp(normalized, language);
+      router.push({ pathname: '/onboarding/otp', params: { phone: normalized } });
+    } catch (e) {
+      setError(errorMessage(t, e));
+    }
+  });
+
+  return (
+    <Screen>
+      <Stack.Screen options={{ title: t('onboarding.phoneTitle') }} />
+      <T variant="title">{t('onboarding.phoneTitle')}</T>
+      <T variant="muted">{t('onboarding.phoneHint')}</T>
+      <Controller
+        control={control}
+        name="phone"
+        render={({ field }) => (
+          <Field
+            label="+965"
+            placeholder={t('onboarding.phonePlaceholder')}
+            keyboardType="phone-pad"
+            autoComplete="tel"
+            textContentType="telephoneNumber"
+            value={field.value}
+            onChangeText={field.onChange}
+            error={formState.errors.phone?.message}
+            testID="phone-input"
+            maxLength={16}
+          />
+        )}
+      />
+      {error ? <T color="#C62828">{error}</T> : null}
+      <Button
+        title={t('onboarding.sendCode')}
+        onPress={() => void submit()}
+        loading={formState.isSubmitting}
+        testID="phone-submit"
+      />
+    </Screen>
+  );
+}

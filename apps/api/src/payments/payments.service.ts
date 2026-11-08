@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { IntentResponse, PaymentView } from '@sanad/api-client';
 import { RuleError, buildSchedule, circleRules, kuwaitDate, type Fils } from '@sanad/core';
 import { and, desc, eq } from 'drizzle-orm';
 import { ApiError, conflict, forbidden, notFound, unprocessable } from '../common/errors.js';
@@ -40,7 +41,7 @@ export class PaymentsService {
     @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
   ) {}
 
-  view(p: PaymentRow) {
+  view(p: PaymentRow): PaymentView {
     return {
       id: p.id,
       purpose: p.purpose,
@@ -57,7 +58,11 @@ export class PaymentsService {
   }
 
   /** Create a payment intent. `idempotencyKey` (header) makes retries return the same intent. */
-  async createIntent(userId: string, input: IntentInput, idempotencyKey: string) {
+  async createIntent(
+    userId: string,
+    input: IntentInput,
+    idempotencyKey: string,
+  ): Promise<IntentResponse> {
     if (!/^[A-Za-z0-9_-]{8,80}$/.test(idempotencyKey))
       throw unprocessable('IDEMPOTENCY_KEY', 'Idempotency-Key header (8–80 chars) is required');
     const key = `${userId}:${idempotencyKey}`;

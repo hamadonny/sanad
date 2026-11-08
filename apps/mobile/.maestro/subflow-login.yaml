@@ -1,0 +1,18 @@
+appId: kw.sanad.app
+---
+- tapOn:
+    id: lang-ar
+- tapOn:
+    id: welcome-skip
+- tapOn:
+    id: phone-input
+- inputText: ${LOCAL}
+- tapOn:
+    id: phone-submit
+- runScript:
+    file: scripts/otp.js
+    env:
+      PHONE: +965${LOCAL}
+- tapOn:
+    id: otp-input
+- inputText: ${output.code}

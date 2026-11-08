@@ -1,0 +1,19 @@
+appId: kw.sanad.app
+name: Join — calculator, agreement, membership fee
+---
+- tapOn: { id: tab-join }
+- tapOn: { id: 'amount-100.000' }
+- assertVisible: { id: calc-receive }
+- assertVisible: { id: calc-entry-fee }
+- tapOn: { id: join-continue }
+- tapOn: { id: contract-agree }
+- tapOn: { id: contract-sign }
+- extendedWaitUntil:
+    visible: { id: payment-total }
+    timeout: 15000
+- assertVisible: '.*100.000.*'
+- tapOn: { id: payment-confirm }
+- extendedWaitUntil:
+    visible: { id: payment-success }
+    timeout: 15000
+- tapOn: { id: payment-done }

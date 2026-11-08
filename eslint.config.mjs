@@ -2,6 +2,7 @@
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -17,6 +18,7 @@ export default tseslint.config(
       'apps/api/migrations/**',
       'apps/mobile/android/**',
       'apps/mobile/ios/**',
+      'apps/mobile/.maestro/**',
     ],
   },
   js.configs.recommended,
@@ -46,11 +48,16 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.test.ts'],
+    files: ['apps/mobile/**/*.tsx', 'apps/admin/**/*.tsx'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'warn' },
+  },
+  {
+    files: ['**/*.test.ts', '**/*.test.tsx'],
     rules: { '@typescript-eslint/no-non-null-assertion': 'off' },
   },
   {
-    files: ['**/*.cjs', '**/*.config.js'],
+    files: ['**/*.cjs', '**/*.config.js', '**/jest.setup.js'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
     rules: { '@typescript-eslint/no-require-imports': 'off' },
   },

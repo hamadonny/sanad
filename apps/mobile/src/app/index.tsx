@@ -1,58 +1,25 @@
-import { kwd } from '@sanad/core';
-import { isSupportedLanguage, defaultLanguage } from '@sanad/i18n';
-import { colors, radii, spacing, typography } from '@sanad/ui-tokens';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, Text, View, useColorScheme } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { layoutDirection } from '../lib/i18n';
-import { displayKwd } from '../lib/money';
+import { useQuery } from '@tanstack/react-query';
+import { Redirect } from 'expo-router';
+import { LoadingView } from '../components/ui';
+import { api } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import { keys } from '../lib/query';
+import { useSettings } from '../lib/settings';
 
-export default function HomeScreen() {
-  const { t, i18n } = useTranslation();
-  const language = isSupportedLanguage(i18n.language) ? i18n.language : defaultLanguage;
-  const palette = colors[useColorScheme() === 'dark' ? 'dark' : 'light'];
+/** Entry: language → welcome slides → phone/OTP → identity → notifications → home. */
+export default function Index() {
+  const language = useSettings((s) => s.language);
+  const seenWelcome = useSettings((s) => s.seenWelcome);
+  const asked = useSettings((s) => s.askedNotifications);
+  const signedIn = useAuth((s) => s.status === 'signedIn');
+  const me = useQuery({ queryKey: keys.me, queryFn: api.me, enabled: signedIn });
 
-  return (
-    <SafeAreaView
-      style={[
-        styles.screen,
-        { backgroundColor: palette.background, direction: layoutDirection(language) },
-      ]}
-    >
-      <Text style={[styles.title, { color: palette.primary }]}>{t('app.name')}</Text>
-      <Text style={[styles.subtitle, { color: palette.textMuted }]}>{t('app.tagline')}</Text>
-
-      <View
-        style={[styles.card, { backgroundColor: palette.surface, borderColor: palette.border }]}
-      >
-        <Text style={[styles.cardTitle, { color: palette.text }]}>{t('home.guaranteeBanner')}</Text>
-        <Text
-          style={[styles.amount, { color: palette.text }]}
-          accessibilityLabel={displayKwd(kwd(1000), language)}
-        >
-          {displayKwd(kwd(1000), language)}
-        </Text>
-        <Text style={{ color: palette.textMuted }}>{t('home.comingSoon')}</Text>
-      </View>
-    </SafeAreaView>
-  );
+  if (!language) return <Redirect href="/onboarding/language" />;
+  if (!seenWelcome) return <Redirect href="/onboarding/welcome" />;
+  if (!signedIn) return <Redirect href="/onboarding/phone" />;
+  if (!me.data) return me.isError ? <Redirect href="/(tabs)" /> : <LoadingView />;
+  if (me.data.kycStatus === 'NONE' || me.data.kycStatus === 'REJECTED')
+    return <Redirect href="/kyc" />;
+  if (!asked) return <Redirect href="/onboarding/notifications" />;
+  return <Redirect href="/(tabs)" />;
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, padding: spacing.xl, gap: spacing.md },
-  title: {
-    fontSize: typography.size.display,
-    fontWeight: typography.weight.bold,
-    textAlign: 'auto',
-  },
-  subtitle: { fontSize: typography.size.md },
-  card: {
-    marginTop: spacing.xl,
-    padding: spacing.xl,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    gap: spacing.sm,
-  },
-  cardTitle: { fontSize: typography.size.lg, fontWeight: typography.weight.medium },
-  amount: { fontSize: typography.size.xxl, fontWeight: typography.weight.bold },
-});

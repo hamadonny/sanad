@@ -1,4 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
+import type {
+  AuctionView,
+  CircleDetail,
+  CircleSummary,
+  DrawView,
+  OptionsResponse,
+  ReplacementOffer,
+  ScheduleView,
+} from '@sanad/api-client';
 import type { SanadConfig } from '@sanad/config';
 import {
   addDays,
@@ -329,7 +338,7 @@ export class CirclesService {
 
   // ───────────── Queries ─────────────
 
-  async options(userId: string) {
+  async options(userId: string): Promise<OptionsResponse> {
     const { config } = await this.settings.active();
     const user = await this.members.user(userId);
     const breaker = await this.breaker();
@@ -393,7 +402,7 @@ export class CirclesService {
     if (!m) throw notFound('circle');
   }
 
-  async listMine(userId: string) {
+  async listMine(userId: string): Promise<CircleSummary[]> {
     const rows = await this.dbs.db
       .select({ id: circles.id })
       .from(circleMembers)
@@ -403,7 +412,7 @@ export class CirclesService {
     const out = [];
     for (const r of rows) {
       const { state, row, config } = await this.store.read(r.id);
-      out.push(this.summary(userId, state, row.startDate, config));
+      out.push(this.summary(userId, state, row, config));
     }
     return out;
   }
@@ -411,9 +420,10 @@ export class CirclesService {
   private summary(
     userId: string,
     state: CircleState,
-    startDate: string | null,
+    row: { startDate: string | null; auctionEndsAt: Date | null },
     config: SanadConfig,
-  ) {
+  ): CircleSummary {
+    const startDate = row.startDate;
     const me = state.members.find((m) => m.memberId === userId);
     const mySlot = state.slots.find((s) => s.holderId === userId);
     const schedule = startDate ? buildSchedule(config, startDate, state.n) : [];
@@ -438,10 +448,17 @@ export class CirclesService {
       nextDue: nextUnpaid
         ? { month: nextUnpaid.month, dueDate: nextUnpaid.dueDate, amount: money(state.monthly) }
         : null,
+      auctionEndsAt:
+        state.status === 'AUCTION' && state.auction
+          ? state.auction.spots.reduce(
+              (a, sp) => (sp.endsAt > a ? sp.endsAt : a),
+              row.auctionEndsAt?.toISOString() ?? '',
+            )
+          : null,
     };
   }
 
-  async detail(userId: string, circleId: string) {
+  async detail(userId: string, circleId: string): Promise<CircleDetail> {
     await this.assertMember(userId, circleId);
     const { state, row, config } = await this.store.read(circleId);
     const names = await this.displayNames(state.members.map((m) => m.memberId));
@@ -449,7 +466,7 @@ export class CirclesService {
     const me = state.members.find((m) => m.memberId === userId);
     const mySlot = state.slots.find((s) => s.holderId === userId);
     return {
-      ...this.summary(userId, state, row.startDate, config),
+      ...this.summary(userId, state, row, config),
       configVersion: row.configVersion,
       startDate: row.startDate,
       commitment: state.commitment,
@@ -484,6 +501,21 @@ export class CirclesService {
             bid: money(me.bid),
             holdbackHeld: money(me.holdbackHeld),
             payoutAmount: money(me.payoutAmount),
+            expectedPayout: money(
+              mySlot
+                ? state.monthly * BigInt(state.n) -
+                    me.bid -
+                    holdbackAmount(state.monthly * BigInt(state.n), me.holdbackBps)
+                : 0n,
+            ),
+            expectedRefund: money(
+              mySlot
+                ? completionRefundAmount(
+                    me.entryFeePaid,
+                    refundBpsForSpot(config, state.n, mySlot.spot),
+                  )
+                : 0n,
+            ),
             entryFeePaid: money(me.entryFeePaid),
             latePayments: me.latePayments,
             refundDue: money(me.refundDue),
@@ -500,7 +532,12 @@ export class CirclesService {
     };
   }
 
-  async auctionView(userId: string, circleId: string, s?: CircleState, cfg?: SanadConfig) {
+  async auctionView(
+    userId: string,
+    circleId: string,
+    s?: CircleState,
+    cfg?: SanadConfig,
+  ): Promise<AuctionView> {
     const loaded = s && cfg ? { state: s, config: cfg } : await this.store.read(circleId);
     const { state, config } = loaded;
     if (!state.auction) throw unprocessable('NO_AUCTION', 'this circle has no auction');
@@ -525,6 +562,7 @@ export class CirclesService {
         };
       }),
       canBid: canBid(config, me.tier) && (await this.breaker()) === 'NORMAL',
+      pot: money(pot),
       winners:
         state.status === 'AUCTION'
           ? []
@@ -536,7 +574,7 @@ export class CirclesService {
     };
   }
 
-  async drawView(userId: string, circleId: string) {
+  async drawView(userId: string, circleId: string): Promise<DrawView> {
     await this.assertMember(userId, circleId);
     const { state } = await this.store.read(circleId);
     const [d] = await this.dbs.db.select().from(draws).where(eq(draws.circleId, circleId));
@@ -561,7 +599,7 @@ export class CirclesService {
     };
   }
 
-  async schedule(userId: string, circleId: string) {
+  async schedule(userId: string, circleId: string): Promise<ScheduleView> {
     await this.assertMember(userId, circleId);
     const { state, row, config } = await this.store.read(circleId);
     if (!row.startDate) return { startDate: null, rows: [] };
@@ -577,12 +615,12 @@ export class CirclesService {
   }
 
   /** Vacated spots a member could take over (spec §5.11). */
-  async replacements(userId: string) {
+  async replacements(userId: string): Promise<ReplacementOffer[]> {
+    const out: ReplacementOffer[] = [];
     const open = await this.dbs.db
       .select({ id: circles.id })
       .from(circles)
       .where(eq(circles.status, 'ACTIVE'));
-    const out = [];
     for (const { id } of open) {
       const { state, config } = await this.store.read(id);
       if (state.members.some((m) => m.memberId === userId)) continue;
