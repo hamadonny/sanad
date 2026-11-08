@@ -107,6 +107,8 @@ export const TRANSACTION_TYPES = [
   /** Added: a pre-payout defaulter's advances become a vacancy, not a claim. */
   'CLAIM_CANCELLED',
   'RECOVERY',
+  /** Added: company capital paid into the Guarantee Fund (e.g. the launch reserve). */
+  'FUND_CAPITAL',
   'REVERSAL',
 ] as const;
 
@@ -185,6 +187,20 @@ export function validateTransaction(txn: Transaction): void {
 const sameTxn = (a: Transaction, b: Transaction): boolean =>
   JSON.stringify(a, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v)) ===
   JSON.stringify(b, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v));
+
+/** Company capital paid into the Guarantee Fund (e.g. to reach the minimum reserve at launch). */
+export function fundCapitalTransaction(key: string, amount: Fils, memo?: string): Transaction {
+  invariant(amount > 0n, 'INVALID_AMOUNT', 'capital must be positive');
+  return {
+    key,
+    type: 'FUND_CAPITAL',
+    entries: [
+      { account: ACCOUNTS.gateway, amount },
+      { account: ACCOUNTS.fund, amount: -amount },
+    ],
+    ...(memo !== undefined ? { memo } : {}),
+  };
+}
 
 /** In-memory, append-only ledger. The API persists the same transactions to Postgres. */
 export class Ledger {

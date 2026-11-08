@@ -70,3 +70,41 @@ forfeitedHoldbacks)`, floored at 0 — the engine also checks it equals the circ
     (Example 4: spot 8, 6 months paid out → allowed).
   - Bids are capped at Pot − the bidder's holdback, so a payout can never go negative.
   - Pre-payout default penalty (0% by default) goes to charity by default (configurable).
+
+## D-007 — Drizzle ORM instead of Prisma (Phase 2)
+
+The spec names Prisma. Prisma's migration engine is a native binary downloaded at install time;
+it could not be downloaded in the build environment and is a frequent source of Windows/CI
+friction. Drizzle is pure TypeScript, SQL-first, supports everything needed here (BIGINT as
+`bigint`, partial unique indexes, raw SQL triggers) and its migrator runs anywhere Node runs.
+Schema: `apps/api/src/db/schema.ts`; migrations: `apps/api/migrations` (generated SQL + one
+hand-written file with append-only and balance triggers).
+
+## D-008 — Circle command pipeline (Phase 2)
+
+- Source of truth per circle = the @sanad/core snapshot (`circles.engine_state`, bigint-safe JSON)
+  plus append-only `circle_events`. Every command runs under `SELECT … FOR UPDATE` on the circle.
+- Member, installment, bid and draw tables are projections, kept for queries and DB constraints
+  (unique spot per circle, one active bid per member per circle).
+- Ledger rows are append-only and balanced, enforced twice: in core and by Postgres triggers
+  (UPDATE/DELETE forbidden; deferred trigger rejects an unbalanced transaction at COMMIT).
+- Money out (payouts, refunds) is written as PENDING rows in the same transaction, then sent by
+  the DisbursementService after commit, retried up to 5 times, then FAILED for manual retry.
+- Payments: intent (Idempotency-Key header required) → gateway → signed webhook (HMAC) →
+  SUCCEEDED → applied to the circle. If the rules reject it (e.g. the circle filled), the
+  member is refunded automatically. Replayed webhooks are no-ops.
+- Joining: the seat is taken when the entry fee succeeds, in the oldest FORMING circle for that
+  amount and config version (`SKIP LOCKED`), or a new circle.
+- The scheduler tick is idempotent (tested by running every step twice).
+
+## D-009 — Founder said "do what you see best" for the Phase 1 questions (2026-11-07)
+
+1. Tier holdbacks follow the spec's tier table (tier 1 = 5%); the worked-example fixtures keep
+   A at tier 2 so their numbers match the spec exactly.
+2. Starting reserve: new `FUND_CAPITAL` ledger type; finance/super_admin can pay company capital
+   into the fund (`POST /admin/fund/capital`). Without it, releases wait for the 5,000 KWD floor.
+3. Anti-sniping stays "end + 5 min".
+4. Bid cap stays Pot − holdback.
+5. Pre-payout default penalty (0% by default) stays routed to charity. [LEGAL][SHARIAH]
+6. New config `circle.firstDueAfterDrawDays` (default 7): first due date is 7 days after the
+   draw, so members are not asked to pay on the day spots are announced.

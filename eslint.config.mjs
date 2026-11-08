@@ -13,6 +13,8 @@ export default tseslint.config(
       '**/.expo/**',
       '**/coverage/**',
       '**/next-env.d.ts',
+      'packages/api-client/src/schema.ts',
+      'apps/api/migrations/**',
       'apps/mobile/android/**',
       'apps/mobile/ios/**',
     ],
@@ -39,6 +41,8 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-extraneous-class': 'off',
       '@typescript-eslint/consistent-type-imports': 'off',
+      // Drizzle's `insert().returning()` yields arrays; `rows[0]!` after an insert is intended.
+      '@typescript-eslint/no-non-null-assertion': 'off',
     },
   },
   {

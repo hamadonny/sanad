@@ -7,3 +7,7 @@ coverage
 pnpm-lock.yaml
 apps/mobile/android
 apps/mobile/ios
+packages/api-client/src/schema.ts
+apps/api/migrations/meta
+.data
+packages/api-client/openapi.json

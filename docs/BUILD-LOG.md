@@ -19,7 +19,7 @@ Working rule: stop after each phase for founder approval.
 4. GitHub repo — yes; founder creates it and pushes from their PC.
 5. iOS Expo Go needs the same Expo account signed in on the PC (`npx expo login`) and in Expo Go.
 
-## Phase 1 — Core engine ✅ (2026-11-07) — awaiting approval
+## Phase 1 — Core engine ✅ (2026-11-07) — approved ("do what you see best", see D-009)
 
 - `packages/config`: full versioned schema (all §5 numbers, bps/KWD integers), validation with cross-field rules, `diffConfig` for the admin diff preview.
 - `packages/core`: rules, tiers & join eligibility, Kuwait-date schedule & installment status, risk (exposure, fund ratio, breaker hysteresis, reserve, release blocking), auction (one-spot rule, anti-snipe, identity-free view), provably fair draw (SHA-256 commit, HMAC-SHA256 Fisher–Yates, on-device verify), double-entry ledger (cash/claims sides, idempotency, reversals, fund-outflow guard), circle lifecycle reducer (FORMING→CLOSED incl. advances, held payouts, both default types, replacement, closing, release + retries, recoveries), scenario driver, Monte Carlo simulation + CLI.
@@ -35,4 +35,24 @@ Working rule: stop after each phase for founder approval.
 4. Bid cap: currently only Pot − holdback. Want a lower maximum?
 5. Pre-payout default penalty destination (default charity) [LEGAL][SHARIAH].
 
-## Next: Phase 2 — API (spec §7, §12–§15)
+## Phase 2 — API ✅ (2026-11-07) — awaiting approval
+
+- NestJS 12 + Postgres (Drizzle, D-007) + BullMQ/Redis. 30 tables (spec §13), append-only and balance triggers.
+- Auth: Kuwait phone OTP (hashed, 5-min, 5 attempts, 5/hour), 15-min JWT + rotating refresh with reuse detection. Admin: scrypt password + mandatory TOTP, RBAC for the 6 roles, audit log (identity reads audited).
+- KYC: mock + manual-review providers, AES-256-GCM encrypted Civil ID and documents, blind-index duplicate detection, expiry check.
+- Contracts: versioned placeholder [LEGAL], signature record (version, hash, IP, device).
+- Circles: options/calculator, queue via entry-fee payment, leave/refund, auction + outbid notices, provably fair draw (seed encrypted until reveal), schedule, detail with first-name + initial, replacements.
+- Payments: intents with Idempotency-Key, HMAC-signed webhooks, replay-safe, auto-refund when rules reject, receipts (placeholder PDF), payouts/refunds via disbursement queue with retries.
+- Scheduler tick: forming timeout, auction close + draw, payouts, defaults, reminders (due-3d, due, late, final warning), closing, release retries, circuit breaker.
+- Admin API (UI in Phase 4): overview (fund, exposure, ratio, breaker), KYC queue, circles, members ban/unban, config preview/publish, fund capital, ledger, disbursements retry, legal cases + recoveries, audit, manual tick.
+- Notifications: 21 templates ar/en, outbox + dedupe, mock push/SMS.
+- Seed: demo admin, members, circles in every state, all §5.14 examples played out.
+- OpenAPI → `packages/api-client` (openapi-typescript + openapi-fetch); CI checks it is current.
+- Tests: 23 API integration tests (all 5 worked examples end-to-end via HTTP and cross-checked against the core engine; jobs run twice; webhook race; failed transfer retry) + 106 core.
+
+### Open questions raised in Phase 2
+
+1. Hosting/data residency [DECISION][LEGAL] still open — needed before Phase 7, not before Phase 3.
+2. Response schemas in OpenAPI are untyped for now; Phase 3 adds response DTOs as screens need them.
+
+## Next: Phase 3 — Mobile app (spec §9)

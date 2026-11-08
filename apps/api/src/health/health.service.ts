@@ -1,26 +1,29 @@
 import { Injectable } from '@nestjs/common';
-import { defaultConfig } from '@sanad/config';
-import { formatKwd, kwd } from '@sanad/core';
-
-export interface HealthStatus {
-  status: 'ok';
-  service: 'sanad-api';
-  time: string;
-  businessTimezone: 'Asia/Kuwait';
-  /** Proves the shared packages are wired in: smallest allowed monthly amount, formatted. */
-  smallestMonthlyAmountKwd: string;
-}
+import { sql } from 'drizzle-orm';
+import { ClockService } from '../common/clock.service.js';
+import { DbService } from '../db/db.service.js';
 
 @Injectable()
 export class HealthService {
-  check(now: Date = new Date()): HealthStatus {
-    const smallest = Math.min(...defaultConfig.circle.allowedMonthlyAmountsKwd);
+  constructor(
+    private readonly dbs: DbService,
+    private readonly clock: ClockService,
+  ) {}
+
+  async check() {
+    let database: 'up' | 'down' = 'up';
+    try {
+      await this.dbs.db.execute(sql`select 1`);
+    } catch {
+      database = 'down';
+    }
     return {
-      status: 'ok',
-      service: 'sanad-api',
-      time: now.toISOString(),
-      businessTimezone: 'Asia/Kuwait',
-      smallestMonthlyAmountKwd: formatKwd(kwd(smallest)),
+      status: database === 'up' ? ('ok' as const) : ('degraded' as const),
+      service: 'sanad-api' as const,
+      time: this.clock.now().toISOString(),
+      kuwaitDate: this.clock.today(),
+      businessTimezone: 'Asia/Kuwait' as const,
+      database,
     };
   }
 }

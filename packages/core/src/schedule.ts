@@ -64,10 +64,16 @@ export function dueDayFor(config: SanadConfig, startDate: string): number {
   return Math.min(parse(startDate).d, config.circle.maxDueDayOfMonth);
 }
 
+/**
+ * Rows for months 1..n. The first due date is the start date itself when its day ≤ the cap;
+ * otherwise (e.g. a start on the 30th) the first due date is the cap day of the next month,
+ * so it never falls before the start date.
+ */
 export function buildSchedule(config: SanadConfig, startDate: string, n: number): ScheduleRow[] {
-  const { y, m } = parse(startDate);
+  const { y, m, d } = parse(startDate);
   const dueDay = dueDayFor(config, startDate);
-  const first = `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`;
+  const base = Date.UTC(y, m - 1 + (d > dueDay ? 1 : 0), dueDay);
+  const first = format(base);
   const { gracePeriodDays, defaultThresholdDays } = config.contributions;
   return Array.from({ length: n }, (_, i) => {
     const dueDate = addMonths(first, i);

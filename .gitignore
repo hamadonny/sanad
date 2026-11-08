@@ -14,3 +14,5 @@ Thumbs.db
 apps/mobile/android/
 apps/mobile/ios/
 *.tar.gz
+.data/
+_to_delete/

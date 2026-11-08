@@ -231,12 +231,13 @@ describe('schedule (Asia/Kuwait dates)', () => {
     expect(rows).toHaveLength(10);
     expect(rows[0]).toEqual({
       month: 1,
-      dueDate: '2027-01-28',
-      graceEndsOn: '2027-01-31',
-      payoutDate: '2027-02-02',
-      defaultsOn: '2027-02-12',
+      dueDate: '2027-02-28',
+      graceEndsOn: '2027-03-03',
+      payoutDate: '2027-03-05',
+      defaultsOn: '2027-03-15',
     });
-    expect(rows[9]?.dueDate).toBe('2027-10-28');
+    expect(rows[9]?.dueDate).toBe('2027-11-28');
+    expect(buildSchedule(cfg, '2027-01-09', 2)[0]?.dueDate).toBe('2027-01-09');
   });
 
   it('installment status', () => {

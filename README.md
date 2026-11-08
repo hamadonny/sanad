@@ -68,6 +68,33 @@ curl http://localhost:3000/health
 phone and computer must be on the same Wi-Fi. When the app starts calling the API (Phase 3), set
 `EXPO_PUBLIC_API_URL` in `.env` to your computer's LAN IP, e.g. `http://192.168.1.20:3000`.
 
+## API (apps/api)
+
+NestJS + PostgreSQL (Drizzle ORM) + BullMQ/Redis. Interactive docs at
+http://localhost:3000/docs once it runs.
+
+```bash
+pnpm infra:up                               # Postgres, Redis, Mailpit (Docker Desktop)
+pnpm --filter @sanad/api db:migrate         # create tables
+pnpm --filter @sanad/api db:seed            # demo members, circles in every state, §5.14 examples
+pnpm dev:api                                # http://localhost:3000
+```
+
+The seed prints a demo admin login (email, password, TOTP secret for an authenticator app).
+Demo members use phones `+96550000001…`; request an OTP, then read it at
+`GET /dev/sms?phone=%2B96550000001` (dev only).
+
+Trying a circle end to end without waiting months (dev only):
+
+- `POST /payments/dev/{paymentId}/confirm` — confirm a mock payment as the gateway would.
+- `POST /dev/clock?at=2027-03-10T10:00:00%2B03:00` — move the API clock; `?reset=true` to undo.
+- `POST /dev/tick` — run the scheduler now (payouts, defaults, reminders, closing…).
+
+All payment, identity, SMS and push providers are mocks. Nothing moves real money.
+
+Tests: `pnpm --filter @sanad/api test` runs the full lifecycle for every worked example against
+a throw-away Postgres database (skipped with a warning when Postgres is not running).
+
 ## Financial engine (packages/core)
 
 Every money rule lives here as pure functions, tested against the spec's worked examples (§5.14)

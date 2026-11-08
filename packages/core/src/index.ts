@@ -5,6 +5,7 @@ export * from './auction.js';
 export * from './circle.js';
 export * from './draw.js';
 export * from './errors.js';
+export * from './json.js';
 export * from './ledger.js';
 export * from './money.js';
 export * from './risk.js';

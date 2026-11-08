@@ -11,24 +11,44 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:seed": "nest build && node dist/db/seed.js",
+    "openapi": "nest build && node dist/openapi.js",
+    "admin:create": "nest build && node dist/admin/create-admin.js"
   },
   "dependencies": {
     "@nestjs/common": "^12.4.0",
     "@nestjs/core": "^12.4.0",
     "@nestjs/platform-express": "^12.4.0",
+    "@nestjs/swagger": "^12.1.1",
+    "@nestjs/throttler": "^6.7.1",
     "@sanad/config": "workspace:*",
     "@sanad/core": "workspace:*",
+    "@sanad/i18n": "workspace:*",
+    "bullmq": "^6.7.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "drizzle-orm": "^0.45.4",
+    "ioredis": "^5.8.2",
+    "jose": "^6.2.15",
+    "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@nestjs/cli": "^12.0.12",
     "@nestjs/testing": "^12.4.0",
     "@swc/core": "^1.16.22",
     "@types/express": "^5.0.0",
+    "@types/multer": "^2.3.0",
+    "@types/pg": "^8.15.0",
     "@types/supertest": "^7.2.1",
+    "drizzle-kit": "^0.31.11",
     "supertest": "^7.3.2",
+    "tsx": "^4.23.15",
     "unplugin-swc": "^2.0.0"
   }
 }

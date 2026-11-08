@@ -27,6 +27,8 @@ export const circleSchema = z.object({
   formingTimeoutDays: z.number().int().positive(),
   /** Payout for month k happens on dueDay + payoutOffsetDays. */
   payoutOffsetDays: z.number().int().min(0).max(27),
+  /** Days between the draw and the circle's start date (= first due date, day capped at maxDueDayOfMonth). */
+  firstDueAfterDrawDays: z.number().int().min(0).max(60),
 });
 
 export const entryFeeSchema = z.object({
@@ -169,6 +171,7 @@ export const defaultConfig: SanadConfig = {
     maxDueDayOfMonth: 28,
     formingTimeoutDays: 14,
     payoutOffsetDays: 5,
+    firstDueAfterDrawDays: 7,
   },
   entryFee: { ofMonthlyBps: 10_000 },
   contributions: { gracePeriodDays: 3, defaultThresholdDays: 15, latePenaltyBps: 0 },
