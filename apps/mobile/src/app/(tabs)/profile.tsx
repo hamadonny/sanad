@@ -134,6 +134,13 @@ export default function ProfileTab() {
             onChange={(v) => settings.set({ biometricLock: v })}
           />
         ) : null}
+        <Toggle
+          label={t('profile.shareUsage')}
+          value={settings.shareUsage}
+          onChange={(v) => settings.set({ shareUsage: v })}
+          testID="share-usage"
+        />
+        <T variant="small">{t('profile.shareUsageNote')}</T>
       </Card>
 
       <Card>

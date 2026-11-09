@@ -63,6 +63,30 @@
         ]
       }
     },
+    "/auth/dev-login": {
+      "post": {
+        "operationId": "AuthController_devLogin",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DevLoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/auth/refresh": {
       "post": {
         "operationId": "AuthController_refresh",
@@ -246,6 +270,35 @@
         ]
       }
     },
+    "/contracts/sign/request": {
+      "post": {
+        "operationId": "MembersController_signRequest",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "me"
+        ]
+      }
+    },
     "/contracts/sign": {
       "post": {
         "operationId": "MembersController_sign",
@@ -277,6 +330,182 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "me"
+        ]
+      }
+    },
+    "/contracts/signatures": {
+      "get": {
+        "operationId": "MembersController_signatures",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "me"
+        ]
+      }
+    },
+    "/contracts/signatures/{id}/pdf": {
+      "get": {
+        "operationId": "MembersController_signaturePdf",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "me"
+        ]
+      }
+    },
+    "/contracts/pending-addenda": {
+      "get": {
+        "operationId": "MembersController_pendingAddenda",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "me"
+        ]
+      }
+    },
+    "/circles/{id}/addendum": {
+      "get": {
+        "operationId": "MembersController_addendum",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "me"
+        ]
+      }
+    },
+    "/circles/{id}/addendum/ack": {
+      "post": {
+        "operationId": "MembersController_acknowledge",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "user-agent",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-device-id",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AckDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "me"
+        ]
+      }
+    },
+    "/circles/{id}/addendum/pdf": {
+      "get": {
+        "operationId": "MembersController_addendumPdf",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": ""
@@ -836,6 +1065,81 @@
         ]
       }
     },
+    "/admin/monitoring/errors": {
+      "get": {
+        "operationId": "AdminController_monitoringErrors",
+        "parameters": [
+          {
+            "name": "days",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/monitoring/analytics": {
+      "get": {
+        "operationId": "AdminController_monitoringAnalytics",
+        "parameters": [
+          {
+            "name": "days",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/me": {
+      "get": {
+        "operationId": "AdminController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/overview": {
       "get": {
         "operationId": "AdminController_overview",
@@ -1079,6 +1383,42 @@
         ]
       }
     },
+    "/admin/members": {
+      "get": {
+        "operationId": "AdminController_members",
+        "parameters": [
+          {
+            "name": "q",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/members/{id}": {
       "get": {
         "operationId": "AdminController_member",
@@ -1183,6 +1523,25 @@
         ]
       }
     },
+    "/admin/payments/board": {
+      "get": {
+        "operationId": "AdminController_paymentsBoard",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/config": {
       "get": {
         "operationId": "AdminController_config",
@@ -1229,6 +1588,25 @@
         ]
       }
     },
+    "/admin/config/versions": {
+      "get": {
+        "operationId": "AdminController_configVersions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/config/preview": {
       "post": {
         "operationId": "AdminController_preview",
@@ -1245,35 +1623,6 @@
         },
         "responses": {
           "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/admin/fund/capital": {
-      "post": {
-        "operationId": "AdminController_capital",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CapitalDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
             "description": ""
           }
         },
@@ -1314,6 +1663,69 @@
             "name": "circleId",
             "required": true,
             "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "account",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/finance/revenue": {
+      "get": {
+        "operationId": "AdminController_revenue",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/export/{dataset}": {
+      "get": {
+        "operationId": "AdminController_export",
+        "parameters": [
+          {
+            "name": "dataset",
+            "required": true,
+            "in": "path",
             "schema": {
               "type": "string"
             }
@@ -1417,6 +1829,34 @@
         ]
       }
     },
+    "/admin/legal/cases/{id}/file": {
+      "get": {
+        "operationId": "AdminController_caseFile",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/legal/cases/{id}": {
       "post": {
         "operationId": "AdminController_updateLegal",
@@ -1466,10 +1906,499 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "action",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/legal/cases/{id}/file.pdf": {
+      "get": {
+        "operationId": "AdminController_caseFilePdf",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/legal/cases/{id}/file.zip": {
+      "get": {
+        "operationId": "AdminController_caseFileZip",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/members/{id}/signatures": {
+      "get": {
+        "operationId": "AdminController_memberSignatures",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/signatures/{id}/pdf": {
+      "get": {
+        "operationId": "AdminController_signaturePdf",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/legal-docs": {
+      "get": {
+        "operationId": "AdminController_legalDocsList",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "AdminController_uploadLegalDoc",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/LegalDocDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/legal-docs/{id}/file": {
+      "get": {
+        "operationId": "AdminController_legalDocFile",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/content/templates": {
+      "get": {
+        "operationId": "AdminController_templates",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/content/templates/{key}/{language}": {
+      "put": {
+        "operationId": "AdminController_updateTemplate",
+        "parameters": [
+          {
+            "name": "key",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "language",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/content/contracts": {
+      "get": {
+        "operationId": "AdminController_contracts",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "AdminController_publishContract",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContractDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/content/faq": {
+      "get": {
+        "operationId": "AdminController_faq",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "AdminController_createFaq",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaqDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/content/faq/{id}": {
+      "put": {
+        "operationId": "AdminController_updateFaq",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaqDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      },
+      "delete": {
+        "operationId": "AdminController_deleteFaq",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/support": {
+      "get": {
+        "operationId": "AdminController_support",
+        "parameters": [
+          {
+            "name": "status",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/support/{id}": {
+      "post": {
+        "operationId": "AdminController_updateTicket",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
             "description": ""
           }
         },
@@ -1499,6 +2428,105 @@
         ],
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/content/faq": {
+      "get": {
+        "operationId": "PublicContentController_faq",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/content/legal-status": {
+      "get": {
+        "operationId": "PublicContentController_legalStatus",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/content/legal-docs/{id}/file": {
+      "get": {
+        "operationId": "PublicContentController_legalDoc",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/telemetry/errors": {
+      "post": {
+        "operationId": "TelemetryController_error",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientErrorDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "telemetry"
+        ]
+      }
+    },
+    "/telemetry/events": {
+      "post": {
+        "operationId": "TelemetryController_events",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "telemetry"
         ]
       }
     },
@@ -1568,6 +2596,29 @@
         ]
       }
     },
+    "/dev/admin-totp": {
+      "get": {
+        "operationId": "DevController_adminTotp",
+        "parameters": [
+          {
+            "name": "email",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "dev"
+        ]
+      }
+    },
     "/dev/tick": {
       "post": {
         "operationId": "DevController_tick",
@@ -1585,7 +2636,7 @@
   },
   "info": {
     "title": "Sanad API",
-    "description": "Guaranteed digital jamiya. Money is integer fils as strings (1 KWD = 1,000 fils).",
+    "description": "Digital jamiya, organised by Sanad. Money is integer fils as strings (1 KWD = 1,000 fils).",
     "version": "0.2.0",
     "contact": {}
   },
@@ -1634,6 +2685,18 @@
         "required": [
           "phone",
           "code"
+        ]
+      },
+      "DevLoginDto": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "example": "+96599302447"
+          }
+        },
+        "required": [
+          "phone"
         ]
       },
       "RefreshDto": {
@@ -1707,15 +2770,49 @@
           "address"
         ]
       },
+      "SignRequestDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "ar",
+              "en"
+            ]
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
       "SignContractDto": {
         "type": "object",
         "properties": {
           "version": {
             "type": "number"
+          },
+          "code": {
+            "type": "string",
+            "example": "123456"
           }
         },
         "required": [
-          "version"
+          "version",
+          "code"
+        ]
+      },
+      "AckDto": {
+        "type": "object",
+        "properties": {
+          "documentHash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentHash"
         ]
       },
       "DeviceDto": {
@@ -1740,16 +2837,20 @@
       "TicketDto": {
         "type": "object",
         "properties": {
-          "subject": {
-            "type": "string"
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "IN_PROGRESS",
+              "CLOSED"
+            ]
           },
-          "body": {
+          "note": {
             "type": "string"
           }
         },
         "required": [
-          "subject",
-          "body"
+          "status"
         ]
       },
       "JoinQueueDto": {
@@ -1863,24 +2964,6 @@
           "config"
         ]
       },
-      "CapitalDto": {
-        "type": "object",
-        "properties": {
-          "amountFils": {
-            "type": "string",
-            "example": "5000000",
-            "description": "fils"
-          },
-          "reference": {
-            "type": "string",
-            "example": "launch-reserve-2027"
-          }
-        },
-        "required": [
-          "amountFils",
-          "reference"
-        ]
-      },
       "LegalUpdateDto": {
         "type": "object",
         "properties": {
@@ -1905,6 +2988,180 @@
         },
         "required": [
           "status"
+        ]
+      },
+      "LegalDocDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "CONTRACT_SOURCE",
+              "SHARIAH_REVIEW"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "contractVersion": {
+            "type": "number"
+          },
+          "reviewer": {
+            "type": "string"
+          },
+          "reviewedOn": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "APPROVED_WITH_CONDITIONS",
+              "REJECTED"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title"
+        ]
+      },
+      "TemplateDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "body"
+        ]
+      },
+      "ContractDto": {
+        "type": "object",
+        "properties": {
+          "titleAr": {
+            "type": "string"
+          },
+          "titleEn": {
+            "type": "string"
+          },
+          "bodyAr": {
+            "type": "string"
+          },
+          "bodyEn": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "titleAr",
+          "titleEn",
+          "bodyAr",
+          "bodyEn"
+        ]
+      },
+      "FaqDto": {
+        "type": "object",
+        "properties": {
+          "questionAr": {
+            "type": "string"
+          },
+          "answerAr": {
+            "type": "string"
+          },
+          "questionEn": {
+            "type": "string"
+          },
+          "answerEn": {
+            "type": "string"
+          },
+          "position": {
+            "type": "number"
+          },
+          "published": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "questionAr",
+          "answerAr",
+          "questionEn",
+          "answerEn"
+        ]
+      },
+      "ClientErrorDto": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "mobile",
+              "admin"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "stack": {
+            "type": "string"
+          },
+          "context": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "appVersion": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "message"
+        ]
+      },
+      "EventDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "n": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "EventsDto": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventDto"
+            }
+          },
+          "platform": {
+            "type": "string"
+          },
+          "appVersion": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "events",
+          "platform",
+          "appVersion"
         ]
       }
     }

@@ -26,6 +26,7 @@ import { useDir } from '../../../lib/i18n';
 import { invalidateMoney, keys, queryClient } from '../../../lib/query';
 import { useSettings } from '../../../lib/settings';
 import { useTheme } from '../../../lib/theme';
+import { track } from '../../../lib/telemetry';
 
 type Spot = AuctionView['spots'][number];
 
@@ -55,6 +56,7 @@ export default function AuctionScreen() {
         !(await authenticate(t('auction.confirmTitle'), t('common.cancel')))
       )
         throw new Error('cancelled');
+      track('bid_placed');
       return api.bid(id, spot, fils.toString());
     },
     onSuccess: async (view) => {

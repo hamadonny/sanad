@@ -51,6 +51,8 @@ export const otpChallenges = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     phone: text('phone').notNull(),
+    /** LOGIN or CONTRACT_SIGN: a signing code can never be used to sign in (and vice versa). */
+    purpose: text('purpose').notNull().default('LOGIN'),
     codeHash: text('code_hash').notNull(),
     expiresAt: ts('expires_at').notNull(),
     attempts: smallint('attempts').notNull().default(0),
@@ -164,6 +166,9 @@ export const contractSignatures = pgTable(
     userAgent: text('user_agent'),
     deviceId: text('device_id'),
     otpReference: text('otp_reference'),
+    /** Generated PDF of what was signed (encrypted storage) and its SHA-256. */
+    pdfKey: text('pdf_key'),
+    pdfSha256: text('pdf_sha256'),
     signedAt: ts('signed_at').notNull().defaultNow(),
   },
   (t) => [uniqueIndex('signature_unique').on(t.userId, t.kind, t.contractVersion, t.circleId)],
@@ -290,12 +295,14 @@ export const installments = pgTable(
     dueDate: date('due_date').notNull(),
     payoutDate: date('payout_date').notNull(),
     defaultsOn: date('defaults_on').notNull(),
-    status: text('status').notNull(), // UNPAID | PAID | ADVANCED | REPAID | WAIVED
+    status: text('status').notNull(), // UNPAID | PAID | LATE | COVERED | WAIVED
     paidAt: ts('paid_at'),
   },
   (t) => [
     primaryKey({ columns: [t.circleId, t.spot, t.month] }),
     index('installments_user').on(t.userId, t.dueDate),
+    // Phase 6: payments board / reminders scan unpaid installments by due date.
+    index('installments_status_due').on(t.status, t.dueDate),
   ],
 );
 
@@ -308,7 +315,7 @@ export const payments = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
-    purpose: text('purpose').notNull(), // ENTRY_FEE | CONTRIBUTION | REPLACEMENT
+    purpose: text('purpose').notNull(), // ORGANIZING_FEE | CONTRIBUTION | REPLACEMENT
     circleId: uuid('circle_id'),
     month: smallint('month'),
     spot: smallint('spot'),
@@ -326,7 +333,10 @@ export const payments = pgTable(
     succeededAt: ts('succeeded_at'),
     appliedAt: ts('applied_at'),
   },
-  (t) => [index('payments_user').on(t.userId, t.createdAt)],
+  (t) => [
+    index('payments_user').on(t.userId, t.createdAt),
+    index('payments_status').on(t.status, t.succeededAt),
+  ],
 );
 
 export const payouts = pgTable(
@@ -339,7 +349,7 @@ export const payouts = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
-    kind: text('kind').notNull(), // POT | HOLDBACK_RELEASE
+    kind: text('kind').notNull(), // POT | TOP_UP | HOLDBACK_RELEASE
     month: smallint('month'),
     amountFils: fils('amount_fils').notNull(),
     status: text('status').notNull(), // PENDING | SENT | FAILED
@@ -361,7 +371,7 @@ export const refunds = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
-    kind: text('kind').notNull(), // ENTRY_FEE | COMPLETION | DEFAULTER | PAYMENT_REVERSAL
+    kind: text('kind').notNull(), // ORGANIZING_FEE | DEFAULTER | HOLDBACK_EXCESS | EXCESS_PAYMENT | PAYMENT_REVERSAL
     paymentId: uuid('payment_id'),
     amountFils: fils('amount_fils').notNull(),
     status: text('status').notNull(), // PENDING | SENT | FAILED
@@ -502,8 +512,46 @@ export const notifications = pgTable(
     sentAt: ts('sent_at'),
     readAt: ts('read_at'),
   },
-  (t) => [index('notifications_user').on(t.userId, t.createdAt)],
+  (t) => [
+    index('notifications_user').on(t.userId, t.createdAt),
+    index('notifications_pending').on(t.status, t.createdAt),
+  ],
 );
+
+/**
+ * Founder-uploaded legal documents: the lawyer's final contract (per contract version) and the
+ * Shariah review / fatwa. Files live in encrypted storage. [LEGAL][SHARIAH]
+ */
+export const legalDocuments = pgTable('legal_documents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  kind: text('kind').notNull(), // CONTRACT_SOURCE | SHARIAH_REVIEW
+  contractVersion: integer('contract_version'),
+  title: text('title').notNull(),
+  reviewer: text('reviewer'),
+  reviewedOn: date('reviewed_on'),
+  /** Shariah: PENDING | APPROVED | APPROVED_WITH_CONDITIONS | REJECTED. Contract: UPLOADED. */
+  status: text('status').notNull(),
+  notes: text('notes'),
+  storageKey: text('storage_key').notNull(),
+  filename: text('filename').notNull(),
+  contentType: text('content_type').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  sha256: text('sha256').notNull(),
+  uploadedBy: uuid('uploaded_by'),
+  createdAt: createdAt(),
+});
+
+/** FAQ shown in the app's support screen; edited in the admin dashboard (spec §10 Content). */
+export const faqItems = pgTable('faq_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  position: integer('position').notNull().default(0),
+  questionAr: text('question_ar').notNull(),
+  answerAr: text('answer_ar').notNull(),
+  questionEn: text('question_en').notNull(),
+  answerEn: text('answer_en').notNull(),
+  published: boolean('published').notNull().default(true),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
 
 export const supportTickets = pgTable('support_tickets', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -512,8 +560,10 @@ export const supportTickets = pgTable('support_tickets', {
     .references(() => users.id),
   subject: text('subject').notNull(),
   body: text('body').notNull(),
-  status: text('status').notNull().default('OPEN'),
+  status: text('status').notNull().default('OPEN'), // OPEN | IN_PROGRESS | CLOSED
+  adminNote: text('admin_note'),
   createdAt: createdAt(),
+  updatedAt: ts('updated_at'),
 });
 
 export const adminUsers = pgTable('admin_users', {
@@ -540,7 +590,7 @@ export const auditLogs = pgTable(
     ip: text('ip'),
     createdAt: createdAt(),
   },
-  (t) => [index('audit_created').on(t.createdAt)],
+  (t) => [index('audit_created').on(t.createdAt), index('audit_action').on(t.action, t.createdAt)],
 );
 
 export const systemState = pgTable('system_state', {
@@ -548,3 +598,41 @@ export const systemState = pgTable('system_state', {
   value: jsonb('value').notNull(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
+
+// ───────────── Monitoring & privacy-safe analytics (Phase 6) ─────────────
+
+/** Errors from the API, the app and the dashboard, scrubbed of personal data before storing. */
+export const errorEvents = pgTable(
+  'error_events',
+  {
+    id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    source: text('source').notNull(), // api | mobile | admin
+    platform: text('platform'),
+    appVersion: text('app_version'),
+    fingerprint: text('fingerprint').notNull(),
+    message: text('message').notNull(),
+    stack: text('stack'),
+    context: text('context'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('error_events_created').on(t.createdAt),
+    index('error_events_fp').on(t.fingerprint),
+  ],
+);
+
+/**
+ * Anonymous usage counts per day. No user id, device id, IP or phone — only how many times an
+ * event happened on a platform/app version that day. Members can switch it off in the app.
+ */
+export const analyticsDaily = pgTable(
+  'analytics_daily',
+  {
+    day: date('day').notNull(),
+    event: text('event').notNull(),
+    platform: text('platform').notNull(),
+    appVersion: text('app_version').notNull(),
+    count: integer('count').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.event, t.platform, t.appVersion] })],
+);

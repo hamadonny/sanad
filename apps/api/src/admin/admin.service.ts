@@ -1,12 +1,13 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import {
   ACCOUNTS,
-  fundCapitalTransaction,
-  fundRatioBps,
-  minimumReserve,
+  circleRevenue,
+  circleShortfall,
+  decodeJson,
+  type CircleState,
   type Fils,
 } from '@sanad/core';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service.js';
 import { TokensService } from '../auth/tokens.service.js';
 import type { AdminPrincipal, AdminRole } from '../auth/guards.js';
@@ -39,6 +40,9 @@ import { LedgerRepository } from '../ledger/ledger.repository.js';
 import { DisbursementService } from '../payments/disbursement.service.js';
 import { STORAGE_PROVIDER, type StorageProvider } from '../providers/storage.provider.js';
 import { SettingsService } from '../settings/settings.service.js';
+
+const ADMIN_MAX_FAILURES = 5;
+const ADMIN_LOCK_WINDOW_MS = 15 * 60_000;
 
 export const LEGAL_STATUSES = [
   'OPEN',
@@ -92,19 +96,50 @@ export class AdminService {
     return { id: row.id, totpSecret };
   }
 
+  /**
+   * Password + mandatory TOTP. After 5 failed attempts in 15 minutes the account is locked for
+   * the rest of that window (failures are audited; the password is never logged).
+   */
   async login(email: string, password: string, totp: string, ip: string | null) {
     const bad = new ApiError(
       HttpStatus.UNAUTHORIZED,
       'INVALID_LOGIN',
       'invalid email, password or 2FA code',
     );
-    const [a] = await this.dbs.db
-      .select()
-      .from(adminUsers)
-      .where(eq(adminUsers.email, email.toLowerCase()));
-    if (!a || !a.active || !(await this.crypto.verifyPassword(password, a.passwordHash))) throw bad;
+    const normalized = email.toLowerCase();
+    const since = new Date(this.clock.now().getTime() - ADMIN_LOCK_WINDOW_MS);
+    const [fails] = await this.dbs.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.action, 'admin.login_failed'),
+          eq(auditLogs.entityId, normalized),
+          gt(auditLogs.createdAt, since),
+        ),
+      );
+    if ((fails?.n ?? 0) >= ADMIN_MAX_FAILURES)
+      throw new ApiError(
+        HttpStatus.TOO_MANY_REQUESTS,
+        'ADMIN_LOCKED',
+        'too many failed sign-ins; try again in 15 minutes',
+      );
+    const fail = async () => {
+      await this.audit.log(this.dbs.db, {
+        actorType: 'system',
+        actorId: null,
+        action: 'admin.login_failed',
+        entity: 'admin_email',
+        entityId: normalized,
+        ip,
+      });
+      return bad;
+    };
+    const [a] = await this.dbs.db.select().from(adminUsers).where(eq(adminUsers.email, normalized));
+    if (!a || !a.active || !(await this.crypto.verifyPassword(password, a.passwordHash)))
+      throw await fail();
     if (!verifyTotp(this.crypto.decrypt(a.totpSecretEncrypted), totp, this.clock.now().getTime()))
-      throw bad;
+      throw await fail();
     await this.dbs.db
       .update(adminUsers)
       .set({ lastLoginAt: this.clock.now() })
@@ -121,8 +156,6 @@ export class AdminService {
   // ── overview ──
 
   async overview() {
-    const { config } = await this.settings.active();
-    const { fund, exposure } = await this.scheduler.poolMetrics();
     const counts = await this.dbs.db
       .select({ status: circles.status, n: sql<number>`count(*)::int` })
       .from(circles)
@@ -136,35 +169,42 @@ export class AdminService {
         sql`SELECT count(*)::int AS n FROM defaults WHERE created_at >= date_trunc('month', now())`,
       )
       .then((r) => r.rows as { n: number }[]);
-    const closed = await this.dbs.db
+    const started = await this.dbs.db
       .select({ s: circles.engineState })
       .from(circles)
-      .where(eq(circles.status, 'CLOSED'));
-    const pending = closed.reduce(
-      (acc, c) =>
-        acc +
-        BigInt(
-          (c.s as { stats?: { pendingRelease?: { $fils: string } } }).stats?.pendingRelease
-            ?.$fils ?? '0',
-        ),
-      0n,
-    );
-    const ratio = fundRatioBps(fund, exposure);
+      .where(inArray(circles.status, ['ACTIVE', 'CLOSING', 'CLOSED']));
+    let organizing = 0n;
+    let bids = 0n;
+    let total = 0n;
+    let shortfall = 0n;
+    for (const c of started) {
+      const st = decodeJson<CircleState>(c.s);
+      organizing += st.stats.organizingFees;
+      bids += st.stats.bidRevenue;
+      total += circleRevenue(st.stats);
+      shortfall += circleShortfall(st);
+    }
+    const [held] = (
+      await this.dbs.db.execute(
+        sql`SELECT COALESCE(-SUM(amount_fils), 0)::text AS s FROM ledger_entries WHERE account LIKE 'fees_held:%'`,
+      )
+    ).rows as { s: string }[];
     return {
       circles: Object.fromEntries(counts.map((c) => [c.status, c.n])),
       activeMembers: members?.n ?? 0,
-      guaranteeFund: money(fund),
-      exposure: money(exposure),
-      fundRatioPct: ratio === null ? null : Number(ratio) / 100,
-      minimumReserve: money(minimumReserve(config, exposure)),
-      circuitBreaker: await this.circles.breaker(),
       defaultsThisMonth: defaultsThisMonth?.n ?? 0,
       revenue: {
-        released: money(await this.ledger.balance(this.dbs.db, ACCOUNTS.revenue)),
-        pendingRelease: money(pending),
+        total: money(total),
+        organizingFees: money(organizing),
+        bidRevenue: money(bids),
+        otherFees: money(total - organizing - bids),
       },
+      feesHeld: money(BigInt(held?.s ?? '0')),
+      holdbacksHeld: money(await this.ledger.balance(this.dbs.db, ACCOUNTS.holdbacks)),
+      memberShortfall: money(shortfall),
+      openClaims: money(await this.ledger.balance(this.dbs.db, ACCOUNTS.receivablesControl)),
       charityPayable: money(await this.ledger.balance(this.dbs.db, ACCOUNTS.charity)),
-      note: 'Operating costs are never paid from the Guarantee Fund.',
+      note: 'Sanad organises circles and does not guarantee them (D-017).',
     };
   }
 
@@ -347,26 +387,7 @@ export class AdminService {
     });
   }
 
-  // ── fund ──
-
-  async injectCapital(admin: AdminPrincipal, amount: Fils, reference: string) {
-    return this.dbs.transaction(async (tx) => {
-      await this.ledger.post(tx, [
-        fundCapitalTransaction(
-          `FUND_CAPITAL:${reference}`,
-          amount,
-          `capital by admin ${admin.email}`,
-        ),
-      ]);
-      await this.audit.log(tx, {
-        actorType: 'admin',
-        actorId: admin.id,
-        action: 'fund.capital',
-        details: { amount: amount.toString(), reference },
-      });
-      return { guaranteeFund: money(await this.ledger.fundBalance(tx)) };
-    });
-  }
+  // ── ledger ──
 
   async ledgerAccounts() {
     return (await this.ledger.allBalances(this.dbs.db)).map((a) => ({

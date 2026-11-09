@@ -1,0 +1,6 @@
+{
+  "CFBundleDisplayName": "سند",
+  "NSFaceIDUsageDescription": "يستخدم سند Face ID لقفل التطبيق وتأكيد المدفوعات والمزايدات.",
+  "NSCameraUsageDescription": "يحتاج سند الكاميرا لتصوير بطاقتك المدنية وصورة شخصية للتحقق من هويتك.",
+  "NSPhotoLibraryUsageDescription": "لاختيار صورة البطاقة المدنية من الصور."
+}

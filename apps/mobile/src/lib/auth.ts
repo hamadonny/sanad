@@ -20,7 +20,12 @@ export const useAuth = create<AuthState>((set) => ({
     set({ tokens, status: tokens ? 'signedIn' : 'signedOut' });
   },
   setTokens: async (tokens) => {
-    if (tokens) await secure.set(KEY, JSON.stringify(tokens));
+    // If the keychain write fails (seen on some devices / Expo Go), keep the session in memory
+    // rather than failing sign-in; the member just signs in again after a restart.
+    if (tokens)
+      await secure.set(KEY, JSON.stringify(tokens)).catch((e: unknown) => {
+        if (__DEV__) console.warn('[sanad] could not save tokens to the keychain', e);
+      });
     else await secure.remove(KEY).catch(() => undefined);
     set({ tokens, status: tokens ? 'signedIn' : 'signedOut' });
   },

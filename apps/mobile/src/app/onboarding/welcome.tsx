@@ -10,7 +10,7 @@ import { useTheme } from '../../lib/theme';
 const SLIDES = ['s1', 's2', 's3', 's4'] as const;
 const ICONS = ['🤝', '🛡️', '⏩', '🎁'];
 
-/** Explains the jamiya, the guarantee, priority spots and patience refunds (spec §9.1). */
+/** Explains the jamiya, how Sanad organises it, priority spots and the organising fee (D-017). */
 export default function Welcome() {
   const { t } = useTranslation();
   const { c } = useTheme();

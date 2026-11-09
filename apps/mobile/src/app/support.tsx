@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -6,21 +6,35 @@ import { Linking } from 'react-native';
 import { Button, Card, Field, Row, Screen, T } from '../components/ui';
 import { api } from '../lib/api';
 import { errorMessage } from '../lib/errors';
+import { useDir } from '../lib/i18n';
+import { keys } from '../lib/query';
 import { useTheme } from '../lib/theme';
+import { track } from '../lib/telemetry';
 
 /** Support contacts come from app config (EXPO_PUBLIC_SUPPORT_WHATSAPP / _PHONE). */
-const WHATSAPP = process.env.EXPO_PUBLIC_SUPPORT_WHATSAPP ?? '96500000000';
-const PHONE = process.env.EXPO_PUBLIC_SUPPORT_PHONE ?? '+96500000000';
+const WHATSAPP = process.env.EXPO_PUBLIC_SUPPORT_WHATSAPP ?? '96599302447';
+const PHONE = process.env.EXPO_PUBLIC_SUPPORT_PHONE ?? '+96599302447';
 const FAQ = ['1', '2', '3', '4', '5'] as const;
 
 export default function SupportScreen() {
   const { t } = useTranslation();
   const { c } = useTheme();
+  const { language } = useDir();
+  // FAQ is edited in the admin dashboard; the bundled copy is the offline fallback.
+  const faq = useQuery({ queryKey: keys.faq, queryFn: api.faq, staleTime: 3600_000 });
+  const items =
+    faq.data && faq.data.length > 0
+      ? faq.data.map((f) => ({
+          id: f.id,
+          q: language === 'en' ? f.questionEn : f.questionAr,
+          a: language === 'en' ? f.answerEn : f.answerAr,
+        }))
+      : FAQ.map((n) => ({ id: n, q: t(`support.faqItems.q${n}`), a: t(`support.faqItems.a${n}`) }));
   const [open, setOpen] = useState<string | null>(null);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const send = useMutation({
-    mutationFn: () => api.supportTicket(subject, body),
+    mutationFn: () => api.supportTicket(subject, body).then((r) => (track('support_ticket'), r)),
     onSuccess: () => (setSubject(''), setBody('')),
   });
 
@@ -28,10 +42,14 @@ export default function SupportScreen() {
     <Screen>
       <Stack.Screen options={{ title: t('support.title') }} />
       <T variant="h2">{t('support.faq')}</T>
-      {FAQ.map((n) => (
-        <Card key={n} onPress={() => setOpen(open === n ? null : n)} testID={`faq-${n}`}>
-          <T variant="h2">{t(`support.faqItems.q${n}`)}</T>
-          {open === n ? <T>{t(`support.faqItems.a${n}`)}</T> : null}
+      {items.map((f, i) => (
+        <Card
+          key={f.id}
+          onPress={() => setOpen(open === f.id ? null : f.id)}
+          testID={`faq-${i + 1}`}
+        >
+          <T variant="h2">{f.q}</T>
+          {open === f.id ? <T>{f.a}</T> : null}
         </Card>
       ))}
       <T variant="h2">{t('support.contact')}</T>

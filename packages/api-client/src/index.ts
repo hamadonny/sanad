@@ -11,6 +11,7 @@ import type { paths } from './schema.js';
 export type { paths } from './schema.js';
 export * from './client.js';
 export type * from './responses.js';
+export type * from './admin.js';
 
 export function createSanadClient(baseUrl: string) {
   return createClient<paths>({ baseUrl });

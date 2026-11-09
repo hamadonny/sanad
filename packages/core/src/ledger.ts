@@ -1,5 +1,5 @@
 /**
- * Double-entry ledger (spec §6).
+ * Double-entry ledger (spec §6, organiser model D-017).
  *
  * Sign convention: an entry's `amount` is positive for a DEBIT and negative for a CREDIT.
  * Every transaction's entries sum to zero. Balances are always derived from entries.
@@ -9,45 +9,33 @@
  * CASH side (real money):
  *   gateway_clearing (debit-normal) — all money currently held via the payment provider/bank.
  *   Credit-normal "who the held money belongs to":
- *     circle_pot:{c}, entry_fees_held:{c}, guarantee_fund, holdbacks_payable, refunds_payable,
- *     platform_revenue, charity_payable.
- *   ⇒ money in − money out = gateway_clearing = pots + held fees + fund + payables + revenue + charity.
+ *     circle_pot:{c} (members' contributions not yet paid out), fees_held:{c} (organising fees
+ *     until the draw), holdbacks_payable, refunds_payable, platform_revenue, charity_payable.
+ *   ⇒ money in − money out = gateway_clearing = pots + held fees + payables + revenue + charity.
+ *   There is no guarantee fund: Sanad never pays members' contributions (D-017).
  *
- * CLAIMS side (memo — amounts members owe, not money):
- *   member_receivable:{m} (debit-normal) — advanced by the fund on a member's behalf.
- *   losses (debit-normal) — claims written off.
- *   receivables_control (credit-normal) and recoveries (credit-normal) — their counterparts.
- *
- * Guard: the Guarantee Fund may only be debited by fund-outflow transaction types
- * (advances, refunds, revenue release, reversals) — so it can never pay operating costs.
+ * CLAIMS side (memo — what defaulters owe the group, not Sanad's money):
+ *   member_receivable:{m} (debit-normal) vs receivables_control (credit-normal).
  */
 import { RuleError, invariant } from './errors.js';
 import type { Fils } from './money.js';
 
 export const ACCOUNTS = {
   gateway: 'gateway_clearing',
-  fund: 'guarantee_fund',
   holdbacks: 'holdbacks_payable',
   refunds: 'refunds_payable',
   revenue: 'platform_revenue',
   charity: 'charity_payable',
   receivablesControl: 'receivables_control',
-  losses: 'losses',
-  recoveries: 'recoveries',
   pot: (circleId: string) => `circle_pot:${circleId}`,
-  entryFeesHeld: (circleId: string) => `entry_fees_held:${circleId}`,
+  feesHeld: (circleId: string) => `fees_held:${circleId}`,
   receivable: (memberId: string) => `member_receivable:${memberId}`,
 } as const;
 
 export type AccountSide = 'cash' | 'claims';
 
 export function accountSide(account: string): AccountSide {
-  if (
-    account.startsWith('member_receivable:') ||
-    account === ACCOUNTS.receivablesControl ||
-    account === ACCOUNTS.losses ||
-    account === ACCOUNTS.recoveries
-  ) {
+  if (account.startsWith('member_receivable:') || account === ACCOUNTS.receivablesControl) {
     return 'claims';
   }
   return 'cash';
@@ -55,17 +43,14 @@ export function accountSide(account: string): AccountSide {
 
 const FIXED_ACCOUNTS: ReadonlySet<string> = new Set([
   ACCOUNTS.gateway,
-  ACCOUNTS.fund,
   ACCOUNTS.holdbacks,
   ACCOUNTS.refunds,
   ACCOUNTS.revenue,
   ACCOUNTS.charity,
   ACCOUNTS.receivablesControl,
-  ACCOUNTS.losses,
-  ACCOUNTS.recoveries,
 ]);
 
-const PREFIXED = /^(circle_pot|entry_fees_held|member_receivable):[A-Za-z0-9_-]+$/;
+const PREFIXED = /^(circle_pot|fees_held|member_receivable):[A-Za-z0-9_-]+$/;
 
 export function isKnownAccount(account: string): boolean {
   return FIXED_ACCOUNTS.has(account) || PREFIXED.test(account);
@@ -73,54 +58,42 @@ export function isKnownAccount(account: string): boolean {
 
 /** Debit-normal accounts show their raw balance; credit-normal ones show its negation. */
 export function isDebitNormal(account: string): boolean {
-  return (
-    account === ACCOUNTS.gateway ||
-    account === ACCOUNTS.losses ||
-    account.startsWith('member_receivable:')
-  );
+  return account === ACCOUNTS.gateway || account.startsWith('member_receivable:');
 }
 
 export const TRANSACTION_TYPES = [
-  'ENTRY_FEE_PAID',
-  'ENTRY_FEE_REFUNDED',
-  /** Added: entry fees move from held to the fund once the circle is drawn. */
-  'ENTRY_FEE_TRANSFERRED',
+  /** Organising fee paid on joining (held until the draw). */
+  'FEE_PAID',
+  /** Held fee returned (left while forming, or the circle never filled). */
+  'FEE_REFUNDED',
+  /** Held fee becomes Sanad's revenue at the draw. */
+  'FEE_EARNED',
+  /** Replacement fee (paid straight to revenue). */
+  'REPLACEMENT_FEE',
   'CONTRIBUTION_PAID',
-  'FUND_ADVANCE',
-  /** Added: a late payer repays an amount the fund advanced for them. */
-  'FUND_ADVANCE_REPAID',
-  /** Added: a vacant spot's pot goes back to the fund instead of being paid out. */
-  'POT_RETURNED',
+  /** Months a replacement member pays to catch up with the circle. */
+  'CATCH_UP',
   'PAYOUT',
+  /** Money for a month that arrived after its payout, forwarded to that month's recipient. */
+  'TOP_UP',
   'BID_REVENUE',
   'HOLDBACK_HELD',
   'HOLDBACK_RELEASED',
-  'HOLDBACK_FORFEITED',
-  'COMPLETION_REFUND',
-  'DEFAULTER_REFUND',
-  /** Added: money in refunds_payable is sent to the member. */
+  /** A defaulter's holdback moved into the pot to cover the months they owe. */
+  'HOLDBACK_APPLIED',
+  /** Money owed back to a member (e.g. a pre-payout defaulter's own contributions). */
+  'REFUND_DUE',
   'REFUND_PAID',
-  'REVENUE_RELEASE',
   'LATE_PENALTY',
   'CHARITY_TRANSFER',
-  'LOSS_WRITE_OFF',
-  /** Added: a pre-payout defaulter's advances become a vacancy, not a claim. */
-  'CLAIM_CANCELLED',
+  /** Memo: what a post-payout defaulter owes the group. */
+  'CLAIM_OPENED',
+  /** Money recovered from a defaulter: to the affected members, recovery fee to revenue. */
   'RECOVERY',
-  /** Added: company capital paid into the Guarantee Fund (e.g. the launch reserve). */
-  'FUND_CAPITAL',
   'REVERSAL',
 ] as const;
 
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
-
-const FUND_OUTFLOW_TYPES: ReadonlySet<TransactionType> = new Set([
-  'FUND_ADVANCE',
-  'COMPLETION_REFUND',
-  'DEFAULTER_REFUND',
-  'REVENUE_RELEASE',
-  'REVERSAL',
-]);
 
 export interface Entry {
   account: string;
@@ -172,13 +145,6 @@ export function validateTransaction(txn: Transaction): void {
     const part = txn.entries.filter((e) => accountSide(e.account) === side);
     invariant(sumOf(part) === 0n, 'LEDGER_UNBALANCED', `${txn.key}: ${side} side does not balance`);
   }
-  const debitsFund = txn.entries.some((e) => e.account === ACCOUNTS.fund && e.amount > 0n);
-  if (debitsFund && !FUND_OUTFLOW_TYPES.has(txn.type)) {
-    throw new RuleError(
-      'FUND_MISUSE',
-      `${txn.key}: ${txn.type} may not take money out of the fund`,
-    );
-  }
   if (txn.type === 'REVERSAL') {
     invariant(txn.reverses, 'LEDGER_REVERSAL', `${txn.key}: reversal must reference a transaction`);
   }
@@ -187,20 +153,6 @@ export function validateTransaction(txn: Transaction): void {
 const sameTxn = (a: Transaction, b: Transaction): boolean =>
   JSON.stringify(a, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v)) ===
   JSON.stringify(b, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v));
-
-/** Company capital paid into the Guarantee Fund (e.g. to reach the minimum reserve at launch). */
-export function fundCapitalTransaction(key: string, amount: Fils, memo?: string): Transaction {
-  invariant(amount > 0n, 'INVALID_AMOUNT', 'capital must be positive');
-  return {
-    key,
-    type: 'FUND_CAPITAL',
-    entries: [
-      { account: ACCOUNTS.gateway, amount },
-      { account: ACCOUNTS.fund, amount: -amount },
-    ],
-    ...(memo !== undefined ? { memo } : {}),
-  };
-}
 
 /** In-memory, append-only ledger. The API persists the same transactions to Postgres. */
 export class Ledger {

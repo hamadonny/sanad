@@ -2,23 +2,14 @@ import { defaultConfig, type SanadConfig } from '@sanad/config';
 import { describe, expect, it } from 'vitest';
 import { kwd } from './money.js';
 import {
-  breakerRestrictions,
-  fundRatioBps,
-  minimumReserve,
-  nextBreakerState,
-  releasable,
-} from './risk.js';
-import {
   canBid,
   circleRules,
-  completionRefundAmount,
   holdbackAmount,
   holdbackBps,
   isAllowedMonthly,
   minBidForSpot,
   payoutAmount,
-  refundBpsForSpot,
-  refundTable,
+  recoveryFee,
   tierConfig,
 } from './rules.js';
 import {
@@ -40,13 +31,14 @@ const with_ = (mutate: (c: SanadConfig) => void): SanadConfig => {
 };
 
 describe('circle rules', () => {
-  it('derives pot, entry fee, increment and late penalty', () => {
+  it('derives pot, organising fee (3% of pot), replacement fee, increment and late penalty', () => {
     expect(circleRules(cfg, kwd(100))).toEqual({
       n: 10,
       p: 3,
       monthly: kwd(100),
       pot: kwd(1000),
-      entryFee: kwd(100),
+      organizingFee: kwd(30),
+      replacementFee: kwd(30),
       minIncrement: kwd(5),
       latePenalty: 0n,
     });
@@ -70,9 +62,9 @@ describe('circle rules', () => {
   });
 
   it('holdback applies only to priority spots, by tier', () => {
-    expect(holdbackBps(cfg, 0, 1)).toBe(1_000n);
-    expect(holdbackBps(cfg, 1, 3)).toBe(500n);
-    expect(holdbackBps(cfg, 2, 2)).toBe(0n);
+    expect(holdbackBps(cfg, 0, 1)).toBe(3_000n);
+    expect(holdbackBps(cfg, 1, 3)).toBe(2_500n);
+    expect(holdbackBps(cfg, 2, 2)).toBe(2_000n);
     expect(holdbackBps(cfg, 0, 4)).toBe(0n);
     expect(holdbackAmount(kwd(1000), 1_000n)).toBe(kwd(100));
     expect(() =>
@@ -100,48 +92,9 @@ describe('circle rules', () => {
     expect(() => payoutAmount(kwd(1000), kwd(950), kwd(100))).toThrow(/NEGATIVE_PAYOUT/);
   });
 
-  it('refund table for N = 10 matches the spec', () => {
-    expect(refundTable(cfg, 10)).toEqual([
-      0n,
-      0n,
-      0n,
-      0n,
-      0n,
-      5_000n,
-      5_000n,
-      10_000n,
-      10_000n,
-      10_000n,
-    ]);
-  });
-
-  it('generic refund rule for other N: last ceil(30%) → 100%, ceil(20%) before → 50%', () => {
-    const generic = with_((c) => (c.refunds.explicitTables = {}));
-    expect(refundTable(generic, 10)).toEqual(refundTable(cfg, 10));
-    expect(refundTable(generic, 4)).toEqual([0n, 5_000n, 10_000n, 10_000n]); // 2 full, 1 half
-    expect(refundTable(generic, 12)).toEqual([
-      0n,
-      0n,
-      0n,
-      0n,
-      0n,
-      5_000n,
-      5_000n,
-      5_000n,
-      10_000n,
-      10_000n,
-      10_000n,
-      10_000n,
-    ]);
-    expect(() => refundBpsForSpot(cfg, 10, 11)).toThrow(/INVALID_SPOT/);
-    const short = with_((c) => (c.refunds.explicitTables = { '10': [0] }));
-    expect(() => refundBpsForSpot(short, 10, 5)).toThrow(/CONFIG/);
-  });
-
-  it('[SHARIAH] refund never exceeds the entry fee', () => {
-    expect(completionRefundAmount(kwd(100), 5_000n)).toBe(kwd(50));
-    expect(completionRefundAmount(101n, 5_000n)).toBe(50n); // rounds down; remainder stays in fund
-    expect(() => completionRefundAmount(kwd(100), 10_001n)).toThrow(/REFUND_EXCEEDS_FEE/);
+  it('[SHARIAH] recovery fee is 10% of what is recovered, rounded down', () => {
+    expect(recoveryFee(cfg, kwd(500))).toBe(kwd(50));
+    expect(recoveryFee(cfg, 9n)).toBe(0n);
   });
 });
 
@@ -176,7 +129,6 @@ describe('trust tiers & join eligibility', () => {
     contractSigned: true,
     civilIdExpiry: '2030-01-01',
     today: '2027-01-01',
-    circuitBreakerTripped: false,
   };
 
   it('allows a verified tier-0 member at 100 KWD', () => {
@@ -193,7 +145,6 @@ describe('trust tiers & join eligibility', () => {
         civilIdExpiry: '2026-12-31',
         monthly: kwd(75),
         activeCircles: 2,
-        circuitBreakerTripped: true,
       }),
     ).toEqual([
       'BANNED',
@@ -203,10 +154,7 @@ describe('trust tiers & join eligibility', () => {
       'AMOUNT_NOT_OFFERED',
       'TOO_MANY_ACTIVE_CIRCLES',
     ]);
-    expect(joinBlockers(cfg, { ...base, monthly: kwd(250), circuitBreakerTripped: true })).toEqual([
-      'AMOUNT_ABOVE_TIER',
-      'PAUSED_BY_CIRCUIT_BREAKER',
-    ]);
+    expect(joinBlockers(cfg, { ...base, monthly: kwd(250) })).toEqual(['AMOUNT_ABOVE_TIER']);
   });
 });
 
@@ -249,49 +197,5 @@ describe('schedule (Asia/Kuwait dates)', () => {
     expect(installmentStatus(row, '2027-01-25')).toBe('DEFAULTED');
     expect(installmentStatus(row, '2027-01-30', '2027-01-13')).toBe('PAID');
     expect(installmentStatus(row, '2027-01-30', '2027-01-20')).toBe('PAID_LATE');
-  });
-});
-
-describe('risk controls', () => {
-  it('fund ratio', () => {
-    expect(fundRatioBps(kwd(250), kwd(1000))).toBe(2_500n);
-    expect(fundRatioBps(kwd(100), 0n)).toBeNull();
-    expect(fundRatioBps(-5n, kwd(10))).toBe(0n);
-  });
-
-  it('minimum reserve = max(5,000 KWD, 25% × exposure)', () => {
-    expect(minimumReserve(cfg, kwd(1000))).toBe(kwd(5000));
-    expect(minimumReserve(cfg, kwd(100_000))).toBe(kwd(25_000));
-    expect(minimumReserve(cfg, -1n)).toBe(kwd(5000));
-  });
-
-  it('circuit breaker trips below 25% and resumes at 35%', () => {
-    expect(nextBreakerState(cfg, 'NORMAL', 2_499n)).toBe('TRIPPED');
-    expect(nextBreakerState(cfg, 'NORMAL', 2_500n)).toBe('NORMAL');
-    expect(nextBreakerState(cfg, 'TRIPPED', 3_000n)).toBe('TRIPPED');
-    expect(nextBreakerState(cfg, 'TRIPPED', 3_500n)).toBe('NORMAL');
-    expect(nextBreakerState(cfg, 'TRIPPED', null)).toBe('NORMAL');
-    expect(breakerRestrictions(cfg, 'TRIPPED')).toEqual({
-      priorityAuctionsPaused: true,
-      maxNewCircleMonthly: kwd(100),
-      alertRoles: ['super_admin', 'finance'],
-    });
-    expect(breakerRestrictions(cfg, 'NORMAL').priorityAuctionsPaused).toBe(false);
-  });
-
-  it('release never takes the fund below the reserve', () => {
-    expect(releasable(kwd(600), kwd(10_000), kwd(5_000))).toEqual({
-      release: kwd(600),
-      blocked: 0n,
-    });
-    expect(releasable(kwd(600), kwd(5_200), kwd(5_000))).toEqual({
-      release: kwd(200),
-      blocked: kwd(400),
-    });
-    expect(releasable(kwd(600), kwd(4_000), kwd(5_000))).toEqual({
-      release: 0n,
-      blocked: kwd(600),
-    });
-    expect(releasable(0n, kwd(10_000), kwd(5_000))).toEqual({ release: 0n, blocked: 0n });
   });
 });

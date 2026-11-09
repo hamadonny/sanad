@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import {
-  ACCOUNTS,
   accountSide,
   isDebitNormal,
   validateTransaction,
@@ -94,10 +93,6 @@ export class LedgerRepository {
       .where(where);
     const raw = BigInt(row?.s ?? '0');
     return isDebitNormal(account) ? raw : -raw;
-  }
-
-  fundBalance(tx: Tx): Promise<Fils> {
-    return this.balance(tx, ACCOUNTS.fund);
   }
 
   async allBalances(tx: Tx): Promise<{ account: string; balance: Fils }[]> {

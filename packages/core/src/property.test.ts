@@ -1,18 +1,19 @@
 /**
- * Property-based tests (spec §5.14, §17): random circles, random default patterns and random
- * config within allowed ranges. After every run:
+ * Property-based tests: random circles, random default patterns and random config within
+ * allowed ranges, under the organiser model (D-017). After every run:
  *  - every transaction balances (cash side and claims side separately);
- *  - money in = money out + fund change + revenue + charity + payables (cash identity);
  *  - nothing is left in pots, held fees, holdbacks or refunds payable;
- *  - each payout uses exactly one full pot (payout + bid + holdback = N × M);
- *  - refund ≤ entry fee for every member [SHARIAH];
- *  - the fund is only ever debited by advances, refunds and revenue release;
- *  - each slot's contributions total N × M (incl. replacements);
- *  - release formula = the circle's net fund movement.
+ *  - money held = Sanad's revenue + charity (Sanad holds no fund);
+ *  - no month pays out more than it collected, nor more than one full pot;
+ *  - revenue = organising + replacement fees + bids + recovery fees;
+ *  - with no post-payout default, nobody is short (vacancies repair themselves);
+ *  - a pre-payout defaulter never gets back more than they paid;
+ *  - each slot's months are all settled; replacements pay N × M in total.
  */
 import { defaultConfig, parseConfig, type SanadConfig } from '@sanad/config';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
+import { circleRevenue, circleShortfall, monthCredits } from './circle.js';
 import { ACCOUNTS } from './ledger.js';
 import { kwd, sum } from './money.js';
 import {
@@ -23,13 +24,6 @@ import {
   type ScenarioMember,
 } from './scenario.js';
 
-const FUND_DEBIT_TYPES = new Set([
-  'FUND_ADVANCE',
-  'COMPLETION_REFUND',
-  'DEFAULTER_REFUND',
-  'REVENUE_RELEASE',
-]);
-
 const configArb = fc
   .record({
     n: fc.integer({ min: 4, max: 14 }),
@@ -37,11 +31,13 @@ const configArb = fc
     grace: fc.integer({ min: 0, max: 5 }),
     latePenaltyBps: fc.integer({ min: 0, max: 1_000 }),
     prePenaltyBps: fc.integer({ min: 0, max: 2_000 }),
-    destination: fc.constantFrom('charity' as const, 'fund' as const),
-    holdbacks: fc.tuple(fc.integer({ min: 0, max: 2_000 }), fc.integer({ min: 0, max: 1_000 })),
-    maxLate: fc.integer({ min: 0, max: 3 }),
+    holdbacks: fc.tuple(
+      fc.integer({ min: 0, max: 3_000 }),
+      fc.integer({ min: 0, max: 2_500 }),
+      fc.integer({ min: 0, max: 2_000 }),
+    ),
     cutoff: fc.integer({ min: 0, max: 3 }),
-    useGenericRefunds: fc.boolean(),
+    feeBps: fc.integer({ min: 1, max: 1_000 }),
   })
   .map((r): SanadConfig => {
     const c = structuredClone(defaultConfig);
@@ -51,12 +47,11 @@ const configArb = fc
     c.contributions.gracePeriodDays = r.grace;
     c.contributions.latePenaltyBps = r.latePenaltyBps;
     c.defaults.prePayoutDefaultPenaltyBps = r.prePenaltyBps;
-    c.defaults.prePayoutDefaultPenaltyDestination = r.destination;
     c.risk.tiers[0]!.holdbackBps = r.holdbacks[0];
     c.risk.tiers[1]!.holdbackBps = r.holdbacks[1];
-    c.refunds.maxLatePaymentsForRefund = r.maxLate;
+    c.risk.tiers[2]!.holdbackBps = r.holdbacks[2];
     c.replacement.replacementCutoffMonths = r.cutoff;
-    if (r.useGenericRefunds) c.refunds.explicitTables = {};
+    c.organizingFee.ofPotBps = r.feeBps;
     return parseConfig(c);
   });
 
@@ -121,7 +116,6 @@ const scenarioArb: fc.Arbitrary<Scenario> = configArb.chain((config) => {
         monthly,
         members: ms,
         seed: fixtureSeed(seedLabel),
-        otherPoolBalance: kwd(100_000),
         ...(stopper && replaceAfter !== undefined
           ? {
               replacements: [
@@ -145,78 +139,59 @@ describe('ledger invariants (property-based)', () => {
         const { state, ledger } = runScenario(sc);
         const n = state.n;
         const pot = state.monthly * BigInt(n);
+        const potAcc = ACCOUNTS.pot(sc.circleId);
 
         ledger.assertBalanced();
         expect(state.status).toBe('CLOSED');
 
         // Nothing left in pass-through/payable accounts.
-        expect(ledger.balance(ACCOUNTS.pot(sc.circleId))).toBe(0n);
-        expect(ledger.balance(ACCOUNTS.entryFeesHeld(sc.circleId))).toBe(0n);
+        expect(ledger.balance(potAcc)).toBe(0n);
+        expect(ledger.balance(ACCOUNTS.feesHeld(sc.circleId))).toBe(0n);
         expect(ledger.balance(ACCOUNTS.holdbacks)).toBe(0n);
         expect(ledger.balance(ACCOUNTS.refunds)).toBe(0n);
 
-        // Cash identity: money held = fund + revenue + charity (+ payables, all zero now).
+        // Sanad holds no fund: money kept = revenue + charity.
         expect(ledger.balance(ACCOUNTS.gateway)).toBe(
-          ledger.balance(ACCOUNTS.fund) +
-            ledger.balance(ACCOUNTS.revenue) +
-            ledger.balance(ACCOUNTS.charity),
+          ledger.balance(ACCOUNTS.revenue) + ledger.balance(ACCOUNTS.charity),
         );
+        expect(ledger.balance(ACCOUNTS.revenue)).toBe(circleRevenue(state.stats));
 
-        // Payouts always use exactly one full pot.
-        const byMonth = new Map<number, bigint>();
-        for (const t of ledger.transactions()) {
-          if (t.type === 'PAYOUT' || t.type === 'BID_REVENUE' || t.type === 'HOLDBACK_HELD') {
-            const debit =
-              t.entries.find((e) => e.account === ACCOUNTS.pot(sc.circleId))?.amount ?? 0n;
-            byMonth.set(t.month as number, (byMonth.get(t.month as number) ?? 0n) + debit);
+        // No month hands out more than it collected, and never more than one pot.
+        for (let m = 1; m <= n; m += 1) {
+          const r = state.monthRecords[m];
+          expect(r?.status).toBe('DONE');
+          const out = r!.bidTaken + r!.holdbackTaken + r!.out;
+          expect(out).toBe(monthCredits(state, m));
+          expect(out).toBeLessThanOrEqual(pot);
+          if (r!.recipientId !== null) {
+            const rec = state.members.find((x) => x.memberId === r!.recipientId)!;
+            if (rec.status === 'ACTIVE') expect(rec.payoutAmount).toBe(r!.out);
           }
         }
-        for (const v of byMonth.values()) expect(v).toBe(pot);
 
-        // [SHARIAH] completion refund never exceeds the entry fee.
-        for (const t of ledger.transactions().filter((x) => x.type === 'COMPLETION_REFUND')) {
-          const m = state.members.find((x) => x.memberId === t.memberId);
-          expect(
-            -(t.entries.find((e) => e.account === ACCOUNTS.refunds)?.amount ?? 0n),
-          ).toBeLessThanOrEqual(m?.entryFeePaid ?? 0n);
-        }
+        // Defaults hurt members only after a post-payout default.
+        const shortfall = circleShortfall(state);
+        expect(shortfall).toBeGreaterThanOrEqual(0n);
+        if (!state.members.some((m) => m.status === 'DEFAULTED_POST_PAYOUT'))
+          expect(shortfall).toBe(0n);
 
-        // Fund never pays operating costs.
-        for (const t of ledger.transactions()) {
-          if (t.entries.some((e) => e.account === ACCOUNTS.fund && e.amount > 0n))
-            expect(FUND_DEBIT_TYPES.has(t.type)).toBe(true);
+        for (const m of state.members) {
+          if (m.status === 'DEFAULTED_PRE_PAYOUT')
+            expect(m.contributionsReturned).toBeLessThanOrEqual(m.contributionsPaid);
+          expect(m.refundPaid).toBe(m.refundDue);
         }
 
         // Every slot's month is settled; replacements pay N × M in total.
         for (const sl of state.slots) expect(Object.keys(sl.months)).toHaveLength(n);
         const rep = state.members.find((m) => m.isReplacement);
-        if (rep) expect(rep.contributionsPaid).toBe(pot);
-
-        // Release formula equals the circle's net fund movement (other circles' money excluded).
-        expect(ledger.balance(ACCOUNTS.fund)).toBe(
-          state.stats.pendingRelease +
-            (state.stats.absorbedByPool > 0n ? -state.stats.absorbedByPool : 0n),
-        );
+        if (rep?.status === 'ACTIVE') expect(rep.contributionsPaid).toBe(pot);
 
         // Total in = total out + what stays inside.
-        const inflow = sum(
-          ledger
-            .transactions()
-            .flatMap((t) =>
-              t.entries
-                .filter((e) => e.account === ACCOUNTS.gateway && e.amount > 0n)
-                .map((e) => e.amount),
-            ),
-        );
-        const outflow = sum(
-          ledger
-            .transactions()
-            .flatMap((t) =>
-              t.entries
-                .filter((e) => e.account === ACCOUNTS.gateway && e.amount < 0n)
-                .map((e) => -e.amount),
-            ),
-        );
+        const gw = ledger
+          .transactions()
+          .flatMap((t) => t.entries.filter((e) => e.account === ACCOUNTS.gateway));
+        const inflow = sum(gw.filter((e) => e.amount > 0n).map((e) => e.amount));
+        const outflow = sum(gw.filter((e) => e.amount < 0n).map((e) => -e.amount));
         expect(inflow - outflow).toBe(ledger.balance(ACCOUNTS.gateway));
       }),
       { numRuns: Number(process.env.PROPERTY_RUNS ?? 300) },

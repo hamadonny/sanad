@@ -4,7 +4,7 @@ import { ClockService } from '../common/clock.service.js';
 import { money } from '../common/money.js';
 import { DbService } from '../db/db.service.js';
 import { payments, payouts, refunds } from '../db/schema.js';
-import { CircleStore } from '../circles/circle-store.js';
+import { CircleStore, ENGINE_REFUND_KINDS } from '../circles/circle-store.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { PAYMENT_PROVIDER, type PaymentProvider } from '../providers/payment.provider.js';
 
@@ -104,11 +104,17 @@ export class DisbursementService {
             .where(and(eq(refunds.id, r.id), eq(refunds.status, 'PENDING')))
             .returning({ id: refunds.id });
           if (updated.length === 0) return;
-          if (r.kind === 'COMPLETION' || r.kind === 'DEFAULTER') {
+          if (ENGINE_REFUND_KINDS.has(r.kind)) {
             await this.store.withCircle(
               r.circleId as string,
               'system:disbursement',
-              (cmd) => cmd.apply({ type: 'REFUND_PAID', memberId: r.userId }),
+              (cmd) =>
+                cmd.apply({
+                  type: 'REFUND_PAID',
+                  memberId: r.userId,
+                  amount: r.amountFils,
+                  reference: r.id,
+                }),
               tx,
             );
           }

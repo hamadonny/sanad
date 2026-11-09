@@ -4,32 +4,19 @@
  * circle state first, and ledger/notification/payout writes are keyed.
  *
  * Order per circle: forming timeout → auction close + draw → payouts due → defaults →
- * reminders → closing → blocked-release retry. Then: circuit breaker, disbursements,
- * notification dispatch.
+ * reminders → closing. Then: disbursements, notification dispatch.
  */
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  RuleError,
-  addDays,
-  buildSchedule,
-  circleExposure,
-  fundRatioBps,
-  minimumReserve,
-  nextBreakerState,
-  type Fils,
-} from '@sanad/core';
+import { RuleError, addDays, buildSchedule } from '@sanad/core';
 import { inArray } from 'drizzle-orm';
-import { AuditService } from '../audit/audit.service.js';
 import { ClockService } from '../common/clock.service.js';
 import { money } from '../common/money.js';
-import { DbService, type Tx } from '../db/db.service.js';
+import { DbService } from '../db/db.service.js';
 import { circles } from '../db/schema.js';
 import { CircleStore, type CircleCommand } from '../circles/circle-store.js';
-import { BREAKER_KEY, CirclesService, type BreakerState } from '../circles/circles.service.js';
-import { LedgerRepository } from '../ledger/ledger.repository.js';
+import { CirclesService } from '../circles/circles.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { DisbursementService } from '../payments/disbursement.service.js';
-import { SettingsService } from '../settings/settings.service.js';
 
 export interface TickReport {
   at: string;
@@ -38,9 +25,7 @@ export interface TickReport {
   payouts: number;
   defaults: number;
   closed: number;
-  releasesRetried: number;
   errors: { circleId: string; error: string }[];
-  breaker: BreakerState;
 }
 
 @Injectable()
@@ -51,24 +36,10 @@ export class SchedulerService {
     private readonly dbs: DbService,
     private readonly store: CircleStore,
     private readonly circles: CirclesService,
-    private readonly ledger: LedgerRepository,
-    private readonly settings: SettingsService,
     private readonly notifications: NotificationsService,
     private readonly disbursements: DisbursementService,
-    private readonly audit: AuditService,
     private readonly clock: ClockService,
   ) {}
-
-  /** Pooled fund balance and exposure across every open circle. */
-  async poolMetrics(tx: Tx = this.dbs.db): Promise<{ fund: Fils; exposure: Fils }> {
-    const rows = await tx
-      .select({ id: circles.id })
-      .from(circles)
-      .where(inArray(circles.status, ['ACTIVE', 'CLOSING']));
-    let exposure = 0n;
-    for (const r of rows) exposure += circleExposure((await this.store.read(r.id, tx)).state);
-    return { fund: await this.ledger.fundBalance(tx), exposure };
-  }
 
   async tick(): Promise<TickReport> {
     const report: TickReport = {
@@ -78,27 +49,18 @@ export class SchedulerService {
       payouts: 0,
       defaults: 0,
       closed: 0,
-      releasesRetried: 0,
       errors: [],
-      breaker: 'NORMAL',
     };
     const ids = await this.dbs.db
       .select({ id: circles.id, status: circles.status })
       .from(circles)
-      .where(inArray(circles.status, ['FORMING', 'AUCTION', 'ACTIVE', 'CLOSING', 'CLOSED']));
+      .where(inArray(circles.status, ['FORMING', 'AUCTION', 'ACTIVE', 'CLOSING']));
     for (const { id, status } of ids) {
       try {
         if (status === 'AUCTION') {
           const before = (await this.store.read(id)).state.status;
           await this.circles.closeAuctionAndDraw(id);
           if ((await this.store.read(id)).state.status !== before) report.drawn += 1;
-          continue;
-        }
-        if (status === 'CLOSED') {
-          if ((await this.store.read(id)).state.stats.pendingRelease > 0n) {
-            await this.tryClose(id);
-            report.releasesRetried += 1;
-          }
           continue;
         }
         if (status === 'CLOSING') {
@@ -113,7 +75,6 @@ export class SchedulerService {
         report.errors.push({ circleId: id, error: (e as Error).message });
       }
     }
-    report.breaker = await this.evaluateBreaker();
     await this.disbursements.flush();
     await this.notifications.dispatchPending();
     return report;
@@ -146,8 +107,8 @@ export class SchedulerService {
       report.payouts += 1;
     }
 
-    // Defaults: an overdue month (advanced by the fund, or the member's own held payout month)
-    // that is still unpaid on its default date.
+    // Defaults: a month paid out without the member's money (LATE), or their own held payout
+    // month, still unpaid on its default date.
     for (const sl of cmd.state.slots) {
       const holder = sl.holderId
         ? cmd.state.members.find((m) => m.memberId === sl.holderId)
@@ -155,10 +116,10 @@ export class SchedulerService {
       if (!holder || holder.status !== 'ACTIVE') continue;
       const overdue = schedule.find((r) => {
         const st = sl.months[r.month];
-        const advancedForMe = st?.state === 'ADVANCED' && st.liable === holder.memberId;
+        const late = st?.state === 'LATE';
         const heldOwn =
           st === undefined && cmd.state.heldPayouts.includes(r.month) && sl.spot === r.month;
-        return (advancedForMe || heldOwn) && today >= r.defaultsOn;
+        return (late || heldOwn) && today >= r.defaultsOn;
       });
       if (overdue) {
         cmd.apply({ type: 'MEMBER_DEFAULTED', memberId: holder.memberId });
@@ -174,8 +135,7 @@ export class SchedulerService {
       if (!holder || holder.status !== 'ACTIVE') continue;
       for (const r of schedule) {
         const st = sl.months[r.month];
-        const unpaid =
-          st === undefined || (st.state === 'ADVANCED' && st.liable === holder.memberId);
+        const unpaid = st === undefined || st.state === 'LATE';
         if (!unpaid) continue;
         const finalOn = addDays(r.defaultsOn, -2);
         const kind =
@@ -196,51 +156,16 @@ export class SchedulerService {
     }
   }
 
-  /** CLOSE (or retry a blocked release) using live pool metrics, inside the circle lock. */
+  /** CLOSE inside the circle lock; false while a member still owes a month. */
   private async tryClose(circleId: string): Promise<boolean> {
     try {
-      const { cmd } = await this.store.withCircle(circleId, 'system:scheduler', async (c, tx) => {
-        const { fund, exposure } = await this.poolMetrics(tx);
-        const reserve = minimumReserve(c.config, exposure - circleExposure(c.state));
-        if (c.state.status === 'CLOSING')
-          c.apply({ type: 'CLOSE', poolFundBalance: fund, minimumReserve: reserve });
-        else if (c.state.status === 'CLOSED' && c.state.stats.pendingRelease > 0n)
-          c.apply({ type: 'RELEASE_RETRY', poolFundBalance: fund, minimumReserve: reserve });
+      const { cmd } = await this.store.withCircle(circleId, 'system:scheduler', (c) => {
+        if (c.state.status === 'CLOSING') c.apply({ type: 'CLOSE' });
       });
       return cmd.state.status === 'CLOSED';
     } catch (e) {
-      if (e instanceof RuleError && (e.code === 'UNSETTLED' || e.code === 'MEMBER_UNRESOLVED'))
-        return false;
+      if (e instanceof RuleError && e.code === 'MEMBER_UNRESOLVED') return false;
       throw e;
     }
-  }
-
-  /** Circuit breaker with hysteresis (spec §5.12). Alerts are written to the audit log. */
-  async evaluateBreaker(): Promise<BreakerState> {
-    const { config } = await this.settings.active();
-    const { fund, exposure } = await this.poolMetrics();
-    const current = await this.circles.breaker();
-    const next = nextBreakerState(config, current, fundRatioBps(fund, exposure));
-    if (next !== current) {
-      await this.dbs.transaction(async (tx) => {
-        await this.settings.setState(
-          BREAKER_KEY,
-          { state: next, at: this.clock.now().toISOString() },
-          tx,
-        );
-        await this.audit.log(tx, {
-          actorType: 'system',
-          actorId: null,
-          action: next === 'TRIPPED' ? 'breaker.tripped' : 'breaker.resumed',
-          details: {
-            fund: fund.toString(),
-            exposure: exposure.toString(),
-            alert: ['super_admin', 'finance'],
-          },
-        });
-      });
-      this.logger.warn(`circuit breaker ${current} → ${next}`);
-    }
-    return next;
   }
 }

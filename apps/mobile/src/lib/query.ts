@@ -40,6 +40,10 @@ export const keys = {
   contract: ['contract'] as const,
   kyc: ['kyc'] as const,
   replacements: ['replacements'] as const,
+  faq: ['faq'] as const,
+  signatures: ['signatures'] as const,
+  pendingAddenda: ['pendingAddenda'] as const,
+  addendum: (id: string) => ['addendum', id] as const,
 };
 
 /** After any money action, refresh everything that shows money. */

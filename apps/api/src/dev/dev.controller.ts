@@ -1,6 +1,11 @@
 import { Controller, ForbiddenException, Get, HttpCode, Inject, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { eq } from 'drizzle-orm';
 import { ClockService } from '../common/clock.service.js';
+import { CryptoService } from '../common/crypto.service.js';
+import { totpAt } from '../common/totp.js';
+import { DbService } from '../db/db.service.js';
+import { adminUsers } from '../db/schema.js';
 import { ENV, type Env } from '../config/env.js';
 import { SchedulerService } from '../jobs/scheduler.service.js';
 import { SMS_PROVIDER, type MockSmsProvider } from '../providers/messaging.provider.js';
@@ -18,6 +23,8 @@ export class DevController {
     @Inject(SMS_PROVIDER) private readonly sms: MockSmsProvider,
     private readonly clock: ClockService,
     private readonly scheduler: SchedulerService,
+    private readonly dbs: DbService,
+    private readonly crypto: CryptoService,
   ) {}
 
   private guard(): void {
@@ -44,6 +51,21 @@ export class DevController {
     if (reset === 'true') this.clock.set(null);
     else if (at) this.clock.set(at);
     return this.now();
+  }
+
+  /**
+   * Current 2FA code for a dev admin account, so the dashboard can be tried without an
+   * authenticator app. Dev only — production admins always use their authenticator.
+   */
+  @Get('admin-totp')
+  async adminTotp(@Query('email') email?: string) {
+    this.guard();
+    const [a] = await this.dbs.db
+      .select()
+      .from(adminUsers)
+      .where(eq(adminUsers.email, (email ?? '').toLowerCase()));
+    if (!a) return { code: null };
+    return { code: totpAt(this.crypto.decrypt(a.totpSecretEncrypted), this.clock.now().getTime()) };
   }
 
   @Post('tick')

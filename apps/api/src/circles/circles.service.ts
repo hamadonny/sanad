@@ -25,8 +25,8 @@ import {
   minBidForSpot,
   myStatus,
   publicView,
-  refundBpsForSpot,
-  completionRefundAmount,
+  amountOwed,
+  replacementCost,
   DRAW_ALGORITHM_VERSION,
   type CircleState,
   type Fils,
@@ -46,9 +46,6 @@ import { SettingsService } from '../settings/settings.service.js';
 import { MembersService, OPEN_CIRCLE_STATUSES } from '../users/members.service.js';
 import { CircleStore, type CircleCommand } from './circle-store.js';
 import { SEED_SOURCE, type SeedSource } from '../providers/seed.source.js';
-
-export type BreakerState = 'NORMAL' | 'TRIPPED';
-export const BREAKER_KEY = 'circuit_breaker';
 
 /** "Ahmad Al-Sabah" → "Ahmad A." (spec §9: first name + last initial only). */
 export function displayName(full: string | null | undefined): string {
@@ -73,13 +70,36 @@ export class CirclesService {
     @Inject(SEED_SOURCE) private readonly seeds: SeedSource,
   ) {}
 
-  async breaker(tx: Tx = this.dbs.db): Promise<BreakerState> {
-    return (
-      await this.settings.getState<{ state: BreakerState }>(BREAKER_KEY, { state: 'NORMAL' }, tx)
-    ).state;
+  // ───────────── Eligibility ─────────────
+
+  /** Everything eligibility needs about a member, loaded once (options checks 4 amounts). */
+  private async eligibilityContext(userId: string, tx: Tx = this.dbs.db) {
+    const [user, profile, activeCircles, contractSigned] = await Promise.all([
+      this.members.user(userId, tx),
+      this.members.trustProfile(userId, tx),
+      this.members.activeCircleCount(userId, tx),
+      this.contracts.hasSignedCurrent(userId, tx),
+    ]);
+    return { user, profile, activeCircles, contractSigned };
   }
 
-  // ───────────── Eligibility ─────────────
+  private blockersFor(
+    ctx: Awaited<ReturnType<CirclesService['eligibilityContext']>>,
+    monthly: Fils,
+    config: SanadConfig,
+  ): { blockers: (JoinBlocker | 'CONTRACT_NOT_SIGNED')[]; tier: Tier | null } {
+    const tier = computeTier(config, ctx.profile);
+    const blockers = joinBlockers(config, {
+      profile: ctx.profile,
+      monthly,
+      activeCircles: ctx.activeCircles,
+      identityVerified: ctx.user.kycStatus === 'APPROVED',
+      contractSigned: ctx.contractSigned,
+      civilIdExpiry: ctx.user.civilIdExpiry ?? '0000-01-01',
+      today: this.clock.today(),
+    });
+    return { blockers, tier: tier.kind === 'tier' ? tier.tier : null };
+  }
 
   async eligibility(
     userId: string,
@@ -87,20 +107,7 @@ export class CirclesService {
     config: SanadConfig,
     tx: Tx = this.dbs.db,
   ): Promise<{ blockers: (JoinBlocker | 'CONTRACT_NOT_SIGNED')[]; tier: Tier | null }> {
-    const user = await this.members.user(userId, tx);
-    const profile = await this.members.trustProfile(userId, tx);
-    const tier = computeTier(config, profile);
-    const blockers = joinBlockers(config, {
-      profile,
-      monthly,
-      activeCircles: await this.members.activeCircleCount(userId, tx),
-      identityVerified: user.kycStatus === 'APPROVED',
-      contractSigned: await this.contracts.hasSignedCurrent(userId, tx),
-      civilIdExpiry: user.civilIdExpiry ?? '0000-01-01',
-      today: this.clock.today(),
-      circuitBreakerTripped: (await this.breaker(tx)) === 'TRIPPED',
-    });
-    return { blockers, tier: tier.kind === 'tier' ? tier.tier : null };
+    return this.blockersFor(await this.eligibilityContext(userId, tx), monthly, config);
   }
 
   async assertCanJoin(userId: string, monthly: Fils, tx: Tx = this.dbs.db): Promise<Tier> {
@@ -129,7 +136,6 @@ export class CirclesService {
     const circleId =
       (candidates.rows[0] as { id: string } | undefined)?.id ??
       (await this.store.create(tx, monthly));
-    const paused = (await this.breaker(tx)) === 'TRIPPED';
     await this.store.withCircle(
       circleId,
       `member:${userId}`,
@@ -145,14 +151,14 @@ export class CirclesService {
             `${circleId}:joined:${userId}`,
           ),
         );
-        if (queued === cmd.state.n) this.startAuction(cmd, paused);
+        if (queued === cmd.state.n) this.startAuction(cmd);
       },
       tx,
     );
     return circleId;
   }
 
-  private startAuction(cmd: CircleCommand, paused: boolean): void {
+  private startAuction(cmd: CircleCommand): void {
     const seed = this.seeds.next({
       circleId: cmd.state.circleId,
       memberIds: cmd.state.members.filter((m) => m.status === 'QUEUED').map((m) => m.memberId),
@@ -162,7 +168,6 @@ export class CirclesService {
       type: 'AUCTION_STARTED',
       at: now.toISOString(),
       commitment: commitmentFor(seed),
-      priorityAuctionsPaused: paused,
     });
     const endsAt = new Date(now.getTime() + cmd.config.auction.auctionDurationHours * 3_600_000);
     Object.assign(cmd.patch, {
@@ -191,7 +196,6 @@ export class CirclesService {
   }
 
   async placeBid(userId: string, circleId: string, spot: number, amount: Fils) {
-    const paused = (await this.breaker()) === 'TRIPPED';
     const { cmd } = await this.store.withCircle(circleId, `member:${userId}`, (c) => {
       const before = new Map(
         (c.state.auction?.spots ?? []).map((s) => [s.spot, this.leader(c.state, s.spot)]),
@@ -202,7 +206,6 @@ export class CirclesService {
         spot,
         amount,
         at: this.clock.now().toISOString(),
-        priorityAuctionsPaused: paused,
       });
       for (const [sp, prev] of before) {
         const now = this.leader(c.state, sp);
@@ -326,27 +329,28 @@ export class CirclesService {
     );
   }
 
-  /** Amount a replacement must pay now: entry fee + every month already paid out (+ prepaid). */
+  /** Amount a replacement must pay now: catch-up for months already settled (+ prepaid) + fee. */
   replacementAmount(state: CircleState, config: SanadConfig, spot: number): Fils {
-    const sl = state.slots.find((s) => s.spot === spot);
-    if (!sl) throw notFound('spot');
-    let months = 0;
-    for (let mo = 1; mo <= state.n; mo += 1)
-      if (mo <= state.monthsSettled || sl.months[mo]?.state === 'PAID') months += 1;
-    return circleRules(config, state.monthly).entryFee + state.monthly * BigInt(months);
+    if (!state.slots.some((s) => s.spot === spot)) throw notFound('spot');
+    const { catchUp, fee } = replacementCost(state, config, spot);
+    return catchUp + fee;
   }
 
   // ───────────── Queries ─────────────
 
   async options(userId: string): Promise<OptionsResponse> {
     const { config } = await this.settings.active();
-    const user = await this.members.user(userId);
-    const breaker = await this.breaker();
+    const ctx = await this.eligibilityContext(userId);
+    const { user } = ctx;
     const out = [];
     for (const mKwd of config.circle.allowedMonthlyAmountsKwd) {
       const monthly = kwd(mKwd);
       const rules = circleRules(config, monthly);
-      const { blockers, tier } = await this.eligibility(userId, monthly, config);
+      const all = this.blockersFor(ctx, monthly, config);
+      const tier = all.tier;
+      // Signing happens inside the join flow (agreement → code → fee), so an unsigned (or
+      // outdated) agreement must not lock the amount here. Joining still enforces it.
+      const blockers = all.blockers.filter((b) => b !== 'CONTRACT_NOT_SIGNED');
       out.push({
         monthly: money(monthly),
         available: blockers.length === 0,
@@ -354,14 +358,8 @@ export class CirclesService {
         members: rules.n,
         months: rules.n,
         pot: money(rules.pot),
-        entryFee: money(rules.entryFee),
+        organizingFee: money(rules.organizingFee),
         totalContributions: money(rules.monthly * BigInt(rules.n)),
-        refundBySpot: Array.from({ length: rules.n }, (_, i) => ({
-          spot: i + 1,
-          refund: money(
-            completionRefundAmount(rules.entryFee, refundBpsForSpot(config, rules.n, i + 1)),
-          ),
-        })),
         prioritySpots: Array.from({ length: rules.p }, (_, i) => {
           const spot = i + 1;
           const hb =
@@ -374,13 +372,12 @@ export class CirclesService {
             receiveAtMinBid: money(rules.pot - minBid - hb),
           };
         }),
-        canBid: tier !== null && canBid(config, tier) && breaker === 'NORMAL',
+        canBid: tier !== null && canBid(config, tier),
       });
     }
     return {
       kycStatus: user.kycStatus,
       contractSigned: await this.contracts.hasSignedCurrent(userId),
-      circuitBreaker: breaker,
       options: out,
     };
   }
@@ -430,7 +427,7 @@ export class CirclesService {
     const nextUnpaid = mySlot
       ? schedule.find(
           (r) =>
-            mySlot.months[r.month] === undefined || mySlot.months[r.month]?.state === 'ADVANCED',
+            mySlot.months[r.month] === undefined || mySlot.months[r.month]?.state === 'LATE',
         )
       : undefined;
     return {
@@ -484,9 +481,7 @@ export class CirclesService {
           isMe: receiver === userId,
           status:
             receiver === null
-              ? sl.spot <= state.monthsSettled
-                ? 'RETURNED_TO_FUND'
-                : 'VACANT'
+              ? 'VACANT'
               : state.heldPayouts.includes(sl.spot)
                 ? 'HELD'
                 : paidOut
@@ -508,16 +503,9 @@ export class CirclesService {
                     holdbackAmount(state.monthly * BigInt(state.n), me.holdbackBps)
                 : 0n,
             ),
-            expectedRefund: money(
-              mySlot
-                ? completionRefundAmount(
-                    me.entryFeePaid,
-                    refundBpsForSpot(config, state.n, mySlot.spot),
-                  )
-                : 0n,
-            ),
-            entryFeePaid: money(me.entryFeePaid),
+            organizingFeePaid: money(me.feePaid),
             latePayments: me.latePayments,
+            owed: money(amountOwed(state, userId)),
             refundDue: money(me.refundDue),
             payments: mySlot
               ? schedule.map((r) => ({
@@ -561,7 +549,7 @@ export class CirclesService {
           receiveIfWinAtMin: money(pot - v.minNextBid - hb),
         };
       }),
-      canBid: canBid(config, me.tier) && (await this.breaker()) === 'NORMAL',
+      canBid: canBid(config, me.tier),
       pot: money(pot),
       winners:
         state.status === 'AUCTION'
@@ -627,11 +615,14 @@ export class CirclesService {
       for (const sl of state.slots) {
         if (!canReplace(state, config, sl.spot)) continue;
         const { blockers } = await this.eligibility(userId, state.monthly, config);
+        const cost = replacementCost(state, config, sl.spot);
         out.push({
           circleId: id,
           spot: sl.spot,
           monthly: money(state.monthly),
-          payNow: money(this.replacementAmount(state, config, sl.spot)),
+          payNow: money(cost.catchUp + cost.fee),
+          catchUp: money(cost.catchUp),
+          replacementFee: money(cost.fee),
           available: blockers.length === 0,
           blockers,
         });

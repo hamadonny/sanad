@@ -1,18 +1,22 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Field, Screen, T, useFormat } from '../../components/ui';
+import { Banner, Button, Field, Screen, T, useFormat } from '../../components/ui';
 import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/errors';
 import { useDir } from '../../lib/i18n';
 import { queryClient } from '../../lib/query';
+import { track } from '../../lib/telemetry';
 
 export default function OtpScreen() {
   const { t } = useTranslation();
   const f = useFormat();
   const { language } = useDir();
-  const { phone } = useLocalSearchParams<{ phone: string }>();
-  const [code, setCode] = useState('');
+  const params = useLocalSearchParams<{ phone: string; devCode?: string }>();
+  const phone = params.phone;
+  const [devCode, setDevCode] = useState(params.devCode);
+  // Development only (mock SMS): the API returns the code, so prefill it.
+  const [code, setCode] = useState(params.devCode ?? '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [wait, setWait] = useState(30);
@@ -30,6 +34,7 @@ export default function OtpScreen() {
     try {
       queryClient.clear();
       await api.verifyOtp(phone, western);
+      track('signed_in');
       await api.setLanguage(language).catch(() => undefined);
       router.replace('/');
     } catch (e) {
@@ -44,6 +49,14 @@ export default function OtpScreen() {
       <Stack.Screen options={{ title: t('onboarding.otpTitle') }} />
       <T variant="title">{t('onboarding.otpTitle')}</T>
       <T variant="muted">{t('onboarding.otpHint', { phone: f.num(phone) })}</T>
+      {devCode ? (
+        <Banner
+          tone="warning"
+          title={t('onboarding.devCodeTitle', { code: f.num(devCode) })}
+          body={t('onboarding.devCodeBody')}
+          testID="dev-code"
+        />
+      ) : null}
       <Field
         label={t('onboarding.otpTitle')}
         value={code}
@@ -71,7 +84,13 @@ export default function OtpScreen() {
         disabled={wait > 0}
         onPress={() => {
           setWait(30);
-          void api.requestOtp(phone, language).catch((e: unknown) => setError(errorMessage(t, e)));
+          api
+            .requestOtp(phone, language)
+            .then((r) => {
+              setDevCode(r.devCode);
+              if (r.devCode) setCode(r.devCode);
+            })
+            .catch((e: unknown) => setError(errorMessage(t, e)));
         }}
       />
     </Screen>

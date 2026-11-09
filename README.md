@@ -1,6 +1,6 @@
 # Sanad · سند
 
-Guaranteed digital jamiya (rotating savings circle) for Kuwait — mobile app, API and admin
+Digital jamiya (rotating savings circle) for Kuwait, organised by Sanad (D-017: no guarantee) — mobile app, API and admin
 dashboard. Full product spec: [docs/SPEC.md](docs/SPEC.md). Technical decisions:
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -53,7 +53,7 @@ pnpm build            # build shared packages + apps
 | `pnpm lint`       | ESLint everywhere                                      |
 | `pnpm typecheck`  | TypeScript strict checks everywhere                    |
 | `pnpm format`     | Prettier                                               |
-| `pnpm infra:up`   | Start Postgres (5432), Redis (6379), Mailpit (8025 UI) |
+| `pnpm infra:up`   | Start Postgres (5433), Redis (6380), Mailpit (8026 UI) |
 | `pnpm infra:down` | Stop them                                              |
 
 Quick check that the API is alive:
@@ -83,7 +83,10 @@ the Expo dev server). Set `EXPO_PUBLIC_API_URL` to override. Allow Node through 
 firewall the first time.
 
 Try it with a seeded member: phone `50000052` (ACTIVE circle) or `50000063` (circle in its
-auction). The OTP is at `http://localhost:3000/dev/sms?phone=%2B96550000052`.
+auction). SMS is mocked until Phase 7, so in development the code screen shows the code and
+fills it in for you (it is also at `http://localhost:3000/dev/sms?phone=%2B96550000052`).
+Phones in `DEV_LOGIN_PHONES` (default `+96599302447`) sign in with no code at all. Both are
+switched off automatically in production.
 Payments use the **mock gateway**: the confirmation sheet's Pay button simulates the gateway.
 
 - Screens: onboarding (language, slides, phone + OTP, identity with camera, notifications),
@@ -104,14 +107,15 @@ http://localhost:3000/docs once it runs.
 
 ```bash
 pnpm infra:up                               # Postgres, Redis, Mailpit (Docker Desktop)
-pnpm --filter @sanad/api db:migrate         # create tables
+pnpm --filter @sanad/api db:migrate         # create tables (dev: also runs automatically on start)
 pnpm --filter @sanad/api db:seed            # demo members, circles in every state, §5.14 examples
 pnpm dev:api                                # http://localhost:3000
 ```
 
 The seed prints a demo admin login (email, password, TOTP secret for an authenticator app).
-Demo members use phones `+96550000001…`; request an OTP, then read it at
-`GET /dev/sms?phone=%2B96550000001` (dev only).
+Demo members use phones `+96550000001…`; in development `POST /auth/otp/request` returns the
+code as `devCode` (also at `GET /dev/sms?phone=%2B96550000001`). If the app says the database
+is unreachable, start Docker Desktop and run `pnpm infra:up`.
 
 Trying a circle end to end without waiting months (dev only):
 
@@ -124,17 +128,56 @@ All payment, identity, SMS and push providers are mocks. Nothing moves real mone
 Tests: `pnpm --filter @sanad/api test` runs the full lifecycle for every worked example against
 a throw-away Postgres database (skipped with a warning when Postgres is not running).
 
+## Admin dashboard (apps/admin)
+
+Next.js App Router, Arabic (RTL) by default with an English switch. Staff sign in with email,
+password and a 2FA code; the session lives in httpOnly cookies and the Next server calls the API
+for them (tokens never reach browser JavaScript). Each role sees only its sections.
+
+```bash
+pnpm dev:api        # API on :3000 (Docker running)
+pnpm dev:admin      # dashboard on http://localhost:3001
+```
+
+Demo staff accounts are printed by `pnpm --filter @sanad/api db:seed` (password
+`sanad-dev-admin-2027`): `admin@` (super admin), `ops@`, `finance@`, `kyc@`, `legal@`,
+`viewer@` — all `@sanad.local`. In development the login page has a **Fill code (dev)** button,
+so you do not need an authenticator app; production always requires one.
+
+Sections (spec §10): overview (fund, exposure, ratio, breaker, revenue), identity checks,
+circles (members, bids, draw proof, schedule, ledger), members (profile, payments, ban/unban),
+payments & payouts (due today, late, defaults, upcoming payouts, retry), defaults & legal (case
+status, recoveries, printable case file), finance (balances, revenue report, ledger explorer,
+capital, CSV export), config editor (validation + diff, super admin only), content
+(notification templates, contract versions, FAQ), support tickets, audit log.
+
+## Contracts & legal documents
+
+The membership agreement is versioned on the server. Members sign it in the join flow with an
+SMS code (shown on screen in development) and get a signed PDF; after the draw they confirm an
+addendum with their spot and schedule. Receipts and legal case files are PDFs (case files also
+as a ZIP). The contract text is a **placeholder** until you upload the lawyer's version and the
+Shariah review in the dashboard: Content → Contract versions (publish the text), then
+Content → Legal & Shariah documents (upload the files).
+
+## Hardening, monitoring, store
+
+See [docs/HARDENING.md](docs/HARDENING.md) (security review, performance, accessibility,
+monitoring, analytics) and [docs/store/README.md](docs/store/README.md) (what's ready for the
+App Store and Google Play, and the steps once the developer accounts exist). Dashboard →
+Monitoring shows errors and the anonymous member-journey counts.
+
 ## Financial engine (packages/core)
 
 Every money rule lives here as pure functions, tested against the spec's worked examples (§5.14)
 and 300 random circles per test run (property tests). Main entry points:
 
 - `applyCircleEvent(state, event, config)` — the circle lifecycle reducer (FORMING → CLOSED).
-- `Ledger` — double-entry ledger with idempotency keys and a guard that stops the Guarantee
-  Fund paying for anything except advances, refunds and revenue release.
+- `Ledger` — double-entry ledger with idempotency keys; separate cash and claims sides.
+  Sanad holds no fund: money kept = revenue + charity (D-017).
 - `placeBid` / `publicView` — priority auction; `runDraw` / `verifyDraw` — provably fair draw.
-- `computeTier`, `joinBlockers`, `minimumReserve`, `nextBreakerState` — risk controls.
-- `simulate` — Monte Carlo of a pool of circles (`pnpm simulate`).
+- `computeTier`, `joinBlockers` — trust tiers and join eligibility.
+- `simulate` — Monte Carlo of many circles: Sanad's revenue and what members are left short (`pnpm simulate`).
 
 ```bash
 pnpm simulate -- --sanity --post-default 0.1   # expect ≈ 450 KWD loss per circle
@@ -144,16 +187,16 @@ PROPERTY_RUNS=3000 pnpm --filter @sanad/core test   # heavier property test run
 
 ## Build phases
 
-| Phase | Scope                                                   | Status  |
-| ----- | ------------------------------------------------------- | ------- |
-| 0     | Monorepo, tooling, Docker Compose, CI, empty apps       | ✅ Done |
-| 1     | Core financial engine + config + ledger + simulation    | ✅ Done |
-| 2     | API (auth, KYC mock, circles, auction, draw, payments…) | Next    |
-| 3     | Mobile app screens (ar + en)                            |         |
-| 4     | Admin dashboard                                         |         |
-| 5     | Contracts, PDFs, legal case files                       |         |
-| 6     | Hardening, store builds                                 |         |
-| 7     | Real integrations — **only after written go-ahead**     |         |
+| Phase | Scope                                                   | Status                                   |
+| ----- | ------------------------------------------------------- | ---------------------------------------- |
+| 0     | Monorepo, tooling, Docker Compose, CI, empty apps       | ✅ Done                                  |
+| 1     | Core financial engine + config + ledger + simulation    | ✅ Done                                  |
+| 2     | API (auth, KYC mock, circles, auction, draw, payments…) | ✅ Done                                  |
+| 3     | Mobile app screens (ar + en)                            | ✅ Done                                  |
+| 4     | Admin dashboard                                         | ✅ Done                                  |
+| 5     | Contracts, PDFs, legal case files                       | ✅ Done                                  |
+| 6     | Hardening, store builds                                 | ✅ Done (builds wait for store accounts) |
+| 7     | Real integrations — **only after written go-ahead**     | Next                                     |
 
 ## Golden rules
 

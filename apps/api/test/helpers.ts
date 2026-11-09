@@ -24,7 +24,7 @@ import { TokensService } from '../src/auth/tokens.service.js';
 import { fixtureSeed } from '@sanad/core';
 
 const ADMIN_URL =
-  process.env.TEST_DATABASE_URL ?? 'postgresql://sanad:sanad@localhost:5432/postgres';
+  process.env.TEST_DATABASE_URL ?? 'postgresql://sanad:sanad@localhost:5433/postgres';
 
 async function canConnect(): Promise<boolean> {
   const c = new pg.Client({ connectionString: ADMIN_URL, connectionTimeoutMillis: 2000 });
@@ -150,7 +150,16 @@ export async function signUp(
   }
   if (opts.sign !== false) {
     const c = await t.http.get('/contracts/current').set(m.auth).expect(200);
-    await t.http.post('/contracts/sign').set(m.auth).send({ version: c.body.version }).expect(200);
+    const req = await t.http
+      .post('/contracts/sign/request')
+      .set(m.auth)
+      .send({ version: c.body.version })
+      .expect(200);
+    await t.http
+      .post('/contracts/sign')
+      .set(m.auth)
+      .send({ version: c.body.version, code: req.body.devCode })
+      .expect(200);
   }
   return m;
 }
@@ -204,3 +213,10 @@ export async function pay(
 
 /** Kuwait-local instant for a calendar date. */
 export const kuwait = (date: string, time = '10:00') => new Date(`${date}T${time}:00+03:00`);
+
+/** supertest parser that collects a binary body (PDF, ZIP) into a Buffer. */
+export const binary = ((res: NodeJS.ReadableStream, cb: (e: Error | null, b: Buffer) => void) => {
+  const chunks: Buffer[] = [];
+  res.on('data', (c: Buffer) => chunks.push(c));
+  res.on('end', () => cb(null, Buffer.concat(chunks)));
+}) as never;

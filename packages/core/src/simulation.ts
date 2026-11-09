@@ -1,19 +1,18 @@
 /**
- * Monte Carlo simulation of a pool of circles sharing one Guarantee Fund (spec §5.15).
+ * Monte Carlo simulation of many circles under the organiser model (D-017).
  *
  * Each run starts `circles` circles (one every `startEveryMonths`), samples member behaviour
  * after the draw, and drives every circle month by month through the real engine against one
- * shared ledger. Closings use the live pool balance and minimum reserve, so blocked releases
- * and the circuit breaker behave as in production.
+ * shared ledger. Sanad guarantees nothing, so the questions are: how much does Sanad earn per
+ * circle, and how much do honest members end up short when someone defaults?
  *
  * Randomness here only decides *behaviour* (who defaults, who is late). Money is still integer
  * fils computed by the engine.
  */
 import type { SanadConfig } from '@sanad/config';
-import { circleExposure, type CircleState } from './circle.js';
+import { circleRevenue, circleShortfall, openClaim } from './circle.js';
 import { ACCOUNTS, Ledger } from './ledger.js';
 import { kwd, type Fils } from './money.js';
-import { fundRatioBps, minimumReserve, nextBreakerState, type BreakerState } from './risk.js';
 import type { Tier } from './rules.js';
 import { CircleDriver, fixtureSeed, type Behavior, type ScenarioMember } from './scenario.js';
 
@@ -39,7 +38,6 @@ export interface SimulationParams {
   recoveryRate: number;
   /** Probability each priority spot receives one bid at the minimum. */
   bidRate: number;
-  initialFundKwd: number;
   seed: number;
 }
 
@@ -55,36 +53,27 @@ export const defaultSimulationParams = (config: SanadConfig): SimulationParams =
   latePaymentRate: 0.05,
   recoveryRate: 0.3,
   bidRate: 0.6,
-  initialFundKwd: 10_000,
   seed: 42,
 });
 
-export interface MonthPoint {
-  month: number;
-  fund: Fils;
-  exposure: Fils;
-  reserve: Fils;
-  ratioBps: bigint | null;
-}
-
 export interface RunResult {
   revenue: Fils;
-  losses: Fils;
+  /** Money honest members are short at the end (after holdbacks and recoveries). */
+  shortfall: Fils;
+  /** Total volume paid out (payouts + top-ups). */
+  paidOut: Fils;
   circlesClosed: number;
-  everBelowReserve: boolean;
-  breakerTrippedMonths: number;
-  series: MonthPoint[];
+  circlesWithShortfall: number;
 }
 
 export interface SimulationSummary {
   runs: number;
   circlesPerRun: number;
   meanRevenuePerCircleKwd: number;
-  meanLossPerCircleKwd: number;
-  probabilityFundBelowReserve: number;
-  meanBreakerTrippedMonths: number;
-  /** Median and 5th percentile fund ratio (%) per month across runs; null = no exposure. */
-  fundRatioOverTime: { month: number; medianPct: number | null; p5Pct: number | null }[];
+  meanShortfallPerCircleKwd: number;
+  /** Share of all money paid out that members did not receive because of defaults. */
+  shortfallShareOfPayoutsPct: number;
+  probabilityCircleHasShortfall: number;
 }
 
 /** Small, fast, seedable PRNG (mulberry32). Not for security — behaviour sampling only. */
@@ -136,45 +125,23 @@ function sampleBehavior(
   return { kind: 'PAYS_ALL', lateMonths };
 }
 
-interface LiveCircle {
-  driver: CircleDriver;
-  startMonth: number;
-  done: boolean;
-}
-
 export function simulateRun(p: SimulationParams, runIndex: number): RunResult {
   const rand = mulberry32(p.seed + runIndex * 7_919);
   const { config } = p;
   const n = config.circle.membersPerCircle;
   const ledger = new Ledger();
-  const initialFund = kwd(p.initialFundKwd);
   const mix = Object.entries(p.monthlyMix).map(([k, w]) => [Number(k), w] as const);
   const tiers = ([0, 1, 2] as const).map((t) => [t, p.tierMix[t]] as const);
-  const live: LiveCircle[] = [];
-  const series: MonthPoint[] = [];
-  let breaker: BreakerState = 'NORMAL';
-  let breakerTrippedMonths = 0;
-  let everBelow = false;
-
-  const fund = () => initialFund + ledger.balance(ACCOUNTS.fund);
-  const exposure = () =>
-    live.reduce(
-      (acc, c) => acc + (c.driver.state.status === 'CLOSED' ? 0n : circleExposure(c.driver.state)),
-      0n,
-    );
+  const live: { driver: CircleDriver; startMonth: number; done: boolean }[] = [];
 
   const lastMonth = (p.circles - 1) * p.startEveryMonths + n;
   for (let t = 0; t < lastMonth; t += 1) {
-    // Start new circles this month.
     if (t % p.startEveryMonths === 0 && live.length < p.circles) {
       const idx = live.length;
-      let monthlyKwd = pickWeighted(rand, mix);
-      if (breaker === 'TRIPPED')
-        monthlyKwd = Math.min(monthlyKwd, config.risk.breakerMaxMonthlyKwd);
-      const monthly = kwd(monthlyKwd);
+      const monthly = kwd(pickWeighted(rand, mix));
       const pot = monthly * BigInt(n);
       const members: ScenarioMember[] = Array.from({ length: n }, (_, i) => {
-        // Tier limits: members whose tier cannot join this amount are bumped to the lowest tier that can.
+        // Members whose tier cannot join this amount are bumped to the lowest tier that can.
         let tier: Tier = pickWeighted(rand, tiers);
         while (kwd(config.risk.tiers[tier]?.maxMonthlyKwd ?? 0) < monthly && tier < 2)
           tier = (tier + 1) as Tier;
@@ -190,9 +157,7 @@ export function simulateRun(p: SimulationParams, runIndex: number): RunResult {
         }
       }
       const driver = new CircleDriver(config, ledger, `r${runIndex}c${idx}`, monthly);
-      driver.form(members, fixtureSeed(`sim-${p.seed}-${runIndex}-${idx}`), {
-        auctionsPaused: breaker === 'TRIPPED',
-      });
+      driver.form(members, fixtureSeed(`sim-${p.seed}-${runIndex}-${idx}`));
       for (const sl of driver.state.slots) {
         driver.behaviorOf.set(sl.holderId as string, sampleBehavior(p, rand, sl.spot, n));
       }
@@ -204,97 +169,63 @@ export function simulateRun(p: SimulationParams, runIndex: number): RunResult {
       const k = t - c.startMonth + 1;
       if (k >= 1 && k <= n) c.driver.runMonth(k);
       if (k === n) {
-        const before = fund();
-        c.driver.close(before, minimumReserve(config, exposure()));
-        for (const m of c.driver.state.members) {
-          if (m.status !== 'DEFAULTED_POST_PAYOUT' || p.recoveryRate <= 0) continue;
-          const applied = m.holdbackForfeited < m.claimGross ? m.holdbackForfeited : m.claimGross;
-          const open = m.claimGross - applied - m.claimRecovered;
+        c.driver.close();
+        for (const { memberId } of c.driver.state.members) {
+          // Re-read each time: one recovery can top up (and so pay down) another defaulter.
+          const m = c.driver.state.members.find((x) => x.memberId === memberId);
+          const open = m ? openClaim(m) : 0n;
+          if (open === 0n || p.recoveryRate <= 0) continue;
           const amount = (open * BigInt(Math.round(p.recoveryRate * 10_000))) / 10_000n;
-          if (amount > 0n)
-            c.driver.apply({ type: 'RECOVERY', memberId: m.memberId, amount, reference: 'sim' });
+          if (amount > 0n) c.driver.apply({ type: 'RECOVERY', memberId, amount, reference: 'sim' });
         }
+        c.driver.payRefunds();
         c.done = true;
-        // Retry blocked releases of earlier circles.
-        for (const other of live) {
-          if (
-            other.driver.state.status === 'CLOSED' &&
-            other.driver.state.stats.pendingRelease > 0n
-          ) {
-            other.driver.apply({
-              type: 'RELEASE_RETRY',
-              poolFundBalance: fund(),
-              minimumReserve: minimumReserve(config, exposure()),
-            });
-          }
-        }
       }
     }
-
-    const f = fund();
-    const e = exposure();
-    const reserve = minimumReserve(config, e);
-    const ratio = fundRatioBps(f, e);
-    breaker = nextBreakerState(config, breaker, ratio);
-    if (breaker === 'TRIPPED') breakerTrippedMonths += 1;
-    if (f < reserve) everBelow = true;
-    series.push({ month: t + 1, fund: f, exposure: e, reserve, ratioBps: ratio });
   }
 
   ledger.assertBalanced();
   let revenue = 0n;
-  let losses = 0n;
+  let shortfall = 0n;
+  let withShortfall = 0;
   for (const c of live) {
-    const st: CircleState = c.driver.state;
-    revenue += st.stats.bidRevenue + st.stats.released;
-    const lossesCovered =
-      st.stats.advances -
-      st.stats.advanceRepayments -
-      st.stats.potReturned -
-      st.stats.catchUp +
-      st.stats.defaulterRefunds;
-    losses += lossesCovered - st.stats.recoveries - st.stats.forfeitedHoldbacks;
+    const st = c.driver.state;
+    revenue += circleRevenue(st.stats);
+    const sf = circleShortfall(st);
+    shortfall += sf;
+    if (sf > 0n) withShortfall += 1;
   }
+  const paidOut = ledger
+    .transactions()
+    .filter((x) => x.type === 'PAYOUT' || x.type === 'TOP_UP')
+    .reduce(
+      (a, x) => a + (x.entries.find((e) => e.account === ACCOUNTS.gateway)?.amount ?? 0n),
+      0n,
+    );
   return {
     revenue,
-    losses,
+    shortfall,
+    paidOut: -paidOut,
     circlesClosed: live.length,
-    everBelowReserve: everBelow,
-    breakerTrippedMonths,
-    series,
+    circlesWithShortfall: withShortfall,
   };
 }
 
 const toKwd = (f: Fils): number => Number(f) / 1_000;
 
-function percentile(sorted: number[], q: number): number {
-  const i = Math.min(sorted.length - 1, Math.max(0, Math.floor(q * (sorted.length - 1))));
-  return sorted[i] as number;
-}
-
 export function simulate(p: SimulationParams): SimulationSummary {
   const results = Array.from({ length: p.runs }, (_, r) => simulateRun(p, r));
   const totalCircles = results.reduce((a, r) => a + r.circlesClosed, 0);
-  const months = results[0]?.series.length ?? 0;
-  const fundRatioOverTime = Array.from({ length: months }, (_, i) => {
-    const ratios = results
-      .map((r) => r.series[i]?.ratioBps)
-      .filter((x): x is bigint => x !== null && x !== undefined)
-      .map((x) => Number(x) / 100)
-      .sort((a, b) => a - b);
-    return {
-      month: i + 1,
-      medianPct: ratios.length ? percentile(ratios, 0.5) : null,
-      p5Pct: ratios.length ? percentile(ratios, 0.05) : null,
-    };
-  });
+  const shortfall = results.reduce((a, r) => a + r.shortfall, 0n);
+  const paidOut = results.reduce((a, r) => a + r.paidOut, 0n);
   return {
     runs: p.runs,
     circlesPerRun: p.circles,
     meanRevenuePerCircleKwd: toKwd(results.reduce((a, r) => a + r.revenue, 0n)) / totalCircles,
-    meanLossPerCircleKwd: toKwd(results.reduce((a, r) => a + r.losses, 0n)) / totalCircles,
-    probabilityFundBelowReserve: results.filter((r) => r.everBelowReserve).length / p.runs,
-    meanBreakerTrippedMonths: results.reduce((a, r) => a + r.breakerTrippedMonths, 0) / p.runs,
-    fundRatioOverTime,
+    meanShortfallPerCircleKwd: toKwd(shortfall) / totalCircles,
+    shortfallShareOfPayoutsPct:
+      paidOut > 0n ? (toKwd(shortfall) / toKwd(paidOut + shortfall)) * 100 : 0,
+    probabilityCircleHasShortfall:
+      results.reduce((a, r) => a + r.circlesWithShortfall, 0) / totalCircles,
   };
 }

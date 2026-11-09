@@ -13,12 +13,17 @@ import type {
   MeResponse,
   NotificationView,
   OptionsResponse,
+  OtpRequestResponse,
+  SignatureView,
+  AddendumView,
+  LegalStatus,
   OtpVerifyResponse,
   PaymentView,
   ReplacementOffer,
   ScheduleView,
   TokenPair,
 } from './responses.js';
+import type { FaqItem } from './admin.js';
 
 export class ApiError extends Error {
   constructor(
@@ -144,7 +149,7 @@ export class SanadApi {
 
   // ── auth ──
   requestOtp(phone: string, language: 'ar' | 'en') {
-    return this.request<{ expiresIn: number }>(
+    return this.request<OtpRequestResponse>(
       'POST',
       '/auth/otp/request',
       { phone, language },
@@ -152,12 +157,14 @@ export class SanadApi {
     );
   }
   async verifyOtp(phone: string, code: string): Promise<OtpVerifyResponse> {
-    const r = await this.request<OtpVerifyResponse>(
-      'POST',
-      '/auth/otp/verify',
-      { phone, code },
-      { auth: false },
-    );
+    return this.signIn('/auth/otp/verify', { phone, code });
+  }
+  /** Development only: sign in an allow-listed phone without a code. */
+  async devLogin(phone: string): Promise<OtpVerifyResponse> {
+    return this.signIn('/auth/dev-login', { phone });
+  }
+  private async signIn(path: string, body: Record<string, string>): Promise<OtpVerifyResponse> {
+    const r = await this.request<OtpVerifyResponse>('POST', path, body, { auth: false });
     await this.opts.tokens.set({
       accessToken: r.accessToken,
       refreshToken: r.refreshToken,
@@ -179,6 +186,8 @@ export class SanadApi {
 
   // ── me ──
   me = () => this.request<MeResponse>('GET', '/me');
+  /** Public FAQ edited in the admin dashboard. */
+  faq = () => this.request<FaqItem[]>('GET', '/content/faq', undefined, { auth: false });
   setLanguage = (language: 'ar' | 'en') => this.request<MeResponse>('PATCH', '/me', { language });
   deleteAccount = () => this.request<undefined>('DELETE', '/me');
   kycStatus = () => this.request<KycStatusResponse>('GET', '/kyc/status');
@@ -192,8 +201,27 @@ export class SanadApi {
     return this.request<{ id: string; status: string }>('POST', '/kyc/submissions', form);
   }
   contract = () => this.request<ContractResponse>('GET', '/contracts/current');
-  signContract = (version: number) =>
-    this.request<{ version: number; documentHash: string }>('POST', '/contracts/sign', { version });
+  /** E-signature step 1: SMS a signing code (development: returned as devCode). */
+  requestSignCode = (version: number, language: 'ar' | 'en') =>
+    this.request<OtpRequestResponse>('POST', '/contracts/sign/request', { version, language });
+  /** E-signature step 2: sign this version with the code. */
+  signContract = (version: number, code: string) =>
+    this.request<{ version: number; documentHash: string; signatureId: string }>(
+      'POST',
+      '/contracts/sign',
+      { version, code },
+    );
+  signatures = () => this.request<SignatureView[]>('GET', '/contracts/signatures');
+  signatureUrl = (id: string) => `${this.opts.baseUrl}/contracts/signatures/${id}/pdf`;
+  pendingAddenda = () => this.request<string[]>('GET', '/contracts/pending-addenda');
+  addendum = (circleId: string) =>
+    this.request<AddendumView>('GET', `/circles/${circleId}/addendum`);
+  acknowledgeAddendum = (circleId: string, documentHash: string) =>
+    this.request<AddendumView>('POST', `/circles/${circleId}/addendum/ack`, { documentHash });
+  addendumUrl = (circleId: string) => `${this.opts.baseUrl}/circles/${circleId}/addendum/pdf`;
+  legalStatus = () =>
+    this.request<LegalStatus>('GET', '/content/legal-status', undefined, { auth: false });
+  legalDocUrl = (id: string) => `${this.opts.baseUrl}/content/legal-docs/${id}/file`;
   registerDevice = (pushToken: string, platform: 'ios' | 'android') =>
     this.request<undefined>('POST', '/devices', { pushToken, platform });
   notifications = () => this.request<NotificationView[]>('GET', '/notifications');

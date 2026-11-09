@@ -1,7 +1,5 @@
 import type { PaymentView } from '@sanad/api-client';
 import { useQuery } from '@tanstack/react-query';
-import { Directory, File, Paths } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
@@ -19,8 +17,10 @@ import {
 } from '../../components/ui';
 import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/errors';
+import { openPdf } from '../../lib/files';
 import { keys } from '../../lib/query';
 import { useTheme } from '../../lib/theme';
+import { track } from '../../lib/telemetry';
 
 const TONE: Record<string, 'good' | 'warn' | 'bad' | 'neutral'> = {
   APPLIED: 'good',
@@ -41,14 +41,8 @@ export default function PaymentsTab() {
   const receipt = async (p: PaymentView) => {
     setError(null);
     try {
-      const dir = new Directory(Paths.cache, 'receipts');
-      if (!dir.exists) dir.create();
-      const file = await File.downloadFileAsync(
-        api.receiptUrl(p.id),
-        new File(dir, `sanad-receipt-${p.id}.pdf`),
-        { headers: await api.authHeader(), idempotent: true },
-      );
-      await Sharing.shareAsync(file.uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });
+      await openPdf(api.receiptUrl(p.id), `sanad-receipt-${p.id.slice(0, 8)}.pdf`);
+      track('receipt_downloaded');
     } catch (e) {
       setError(errorMessage(t, e));
     }

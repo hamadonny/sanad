@@ -7,10 +7,21 @@ import { Controller, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { Image, View } from 'react-native';
 import { z } from 'zod';
-import { Button, Card, ErrorView, Field, LoadingView, Row, Screen, T } from '../../components/ui';
+import {
+  Button,
+  Card,
+  ErrorView,
+  Field,
+  LoadingView,
+  Row,
+  Screen,
+  T,
+  ErrorText,
+} from '../../components/ui';
 import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/errors';
 import { keys } from '../../lib/query';
+import { track } from '../../lib/telemetry';
 
 type Doc = 'front' | 'back' | 'selfie';
 type Photo = { uri: string; name: string; type: string };
@@ -76,6 +87,7 @@ export default function KycScreen() {
         Object.entries(values).filter(([, v]) => v !== undefined && v !== ''),
       ) as Record<string, string>;
       await api.submitKyc(fields, photos);
+      track('kyc_submitted');
       await qc.invalidateQueries({ queryKey: keys.kyc });
       await qc.invalidateQueries({ queryKey: keys.me });
       setEditing(false);
@@ -170,7 +182,7 @@ export default function KycScreen() {
           ) : null}
         </Card>
       ))}
-      {error ? <T color="#C62828">{error}</T> : null}
+      {error ? <ErrorText>{error}</ErrorText> : null}
       <View>
         <Button
           title={t('kyc.submit')}

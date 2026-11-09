@@ -1,7 +1,7 @@
 {
   "name": "sanad",
   "private": true,
-  "description": "Sanad — guaranteed digital jamiya (ROSCA) platform for Kuwait",
+  "description": "Sanad — digital jamiya (ROSCA) organiser for Kuwait",
   "packageManager": "pnpm@10.28.0",
   "engines": {
     "node": ">=22.12.0"

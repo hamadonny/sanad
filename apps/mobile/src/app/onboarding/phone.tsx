@@ -4,11 +4,13 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
-import { Button, Field, Screen, T } from '../../components/ui';
+import { Button, Field, Screen, T, ErrorText } from '../../components/ui';
 import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/errors';
 import { normalizeKuwaitPhone } from '../../lib/format';
+import { queryClient } from '../../lib/query';
 import { useDir } from '../../lib/i18n';
+import { track } from '../../lib/telemetry';
 
 export default function PhoneScreen() {
   const { t } = useTranslation();
@@ -26,8 +28,21 @@ export default function PhoneScreen() {
     setError(null);
     const normalized = normalizeKuwaitPhone(phone) as string;
     try {
-      await api.requestOtp(normalized, language);
-      router.push({ pathname: '/onboarding/otp', params: { phone: normalized } });
+      const r = await api.requestOtp(normalized, language);
+      track('otp_requested');
+      if (r.devLogin) {
+        // Development only: allow-listed test phone, no SMS code (see DEV_LOGIN_PHONES).
+        queryClient.clear();
+        await api.devLogin(normalized);
+        track('signed_in');
+        await api.setLanguage(language).catch(() => undefined);
+        router.replace('/');
+        return;
+      }
+      router.push({
+        pathname: '/onboarding/otp',
+        params: r.devCode ? { phone: normalized, devCode: r.devCode } : { phone: normalized },
+      });
     } catch (e) {
       setError(errorMessage(t, e));
     }
@@ -56,7 +71,7 @@ export default function PhoneScreen() {
           />
         )}
       />
-      {error ? <T color="#C62828">{error}</T> : null}
+      {error ? <ErrorText>{error}</ErrorText> : null}
       <Button
         title={t('onboarding.sendCode')}
         onPress={() => void submit()}

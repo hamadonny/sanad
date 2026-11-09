@@ -14,6 +14,7 @@ import { addDays, buildSchedule, findSeed, kuwaitDate, kwd, type Behavior } from
 import { sql } from 'drizzle-orm';
 import { AppModule } from '../app.module.js';
 import { AdminService } from '../admin/admin.service.js';
+import { ContentService } from '../admin/content.service.js';
 import { CircleStore } from '../circles/circle-store.js';
 import { CirclesService } from '../circles/circles.service.js';
 import { ClockService } from '../common/clock.service.js';
@@ -25,9 +26,7 @@ import { SEED_SOURCE, type CryptoSeedSource } from '../providers/seed.source.js'
 import { SchedulerService } from '../jobs/scheduler.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { DbService } from './db.service.js';
-import { circles, trustProfiles, users } from './schema.js';
-import { fundCapitalTransaction } from '@sanad/core';
-import { LedgerRepository } from '../ledger/ledger.repository.js';
+import { circles, supportTickets, trustProfiles, users } from './schema.js';
 
 if (process.env.NODE_ENV === 'production')
   throw new Error('refusing to seed a production database');
@@ -72,19 +71,18 @@ try {
 } catch {
   /* exists */
 }
-
-// ── launch reserve ──
-await db.transaction((tx) =>
-  app
-    .get(LedgerRepository)
-    .post(tx, [
-      fundCapitalTransaction(
-        'FUND_CAPITAL:demo-launch-reserve',
-        kwd(20_000),
-        'demo launch reserve',
-      ),
-    ]),
-);
+// One demo account per role (same password) to try role-based access.
+const roleAdmins = ['ops', 'finance', 'kyc_reviewer', 'legal', 'viewer'] as const;
+for (const role of roleAdmins) {
+  try {
+    await app
+      .get(AdminService)
+      .createAdmin(`${role.replace('_reviewer', '')}@sanad.local`, adminPassword, [role]);
+  } catch {
+    /* exists */
+  }
+}
+await app.get(ContentService).ensureFaqSeeded();
 
 let phone = 50_000_000;
 let civil = 280_000_000_000;
@@ -110,9 +108,12 @@ async function member(fullNameEn: string, completedCircles = 0): Promise<string>
     {},
   );
   const c = await app.get(ContractsService).current();
-  await app
-    .get(ContractsService)
-    .sign(u!.id, c.version, { ip: '127.0.0.1', userAgent: 'seed', deviceId: null });
+  await app.get(ContractsService).recordSignature(u!.id, c.version, {
+    ip: '127.0.0.1',
+    userAgent: 'seed',
+    deviceId: null,
+    otpReference: 'seed-demo',
+  });
   return u!.id;
 }
 
@@ -170,7 +171,7 @@ async function play(
       }
     : null;
   for (const s of specs)
-    await confirm(ids.get(s.name)!, { purpose: 'ENTRY_FEE', monthlyFils: kwd(100) });
+    await confirm(ids.get(s.name)!, { purpose: 'ORGANIZING_FEE', monthlyFils: kwd(100) });
   const circleId = await circleOf(ids.get(specs[0]!.name)!);
   for (const w of winners)
     await circlesSvc.placeBid(ids.get(w.name)!, circleId, w.bid!.spot, kwd(w.bid!.kwd));
@@ -302,16 +303,33 @@ at(realNow);
 const formingIds: string[] = [];
 for (const n of ['Noura', 'Yousef', 'Maryam', 'Khaled'])
   formingIds.push(await member(`${n} Forming`, 0));
-for (const id of formingIds) await confirm(id, { purpose: 'ENTRY_FEE', monthlyFils: kwd(50) });
+for (const id of formingIds) await confirm(id, { purpose: 'ORGANIZING_FEE', monthlyFils: kwd(50) });
 report.push(['FORMING demo', await circleOf(formingIds[0]!)]);
 
 // CANCELLED: 2 members, timed out.
 at(addDays(realToday, -30));
 const lonely = [await member('Lonely One', 2), await member('Lonely Two', 2)];
-for (const id of lonely) await confirm(id, { purpose: 'ENTRY_FEE', monthlyFils: kwd(250) });
+for (const id of lonely) await confirm(id, { purpose: 'ORGANIZING_FEE', monthlyFils: kwd(250) });
 clock.advance(15 * 86_400_000);
 await scheduler.tick();
 report.push(['CANCELLED demo', await circleOf(lonely[0]!)]);
+
+// Support tickets for the admin queue.
+await db
+  .insert(supportTickets)
+  .values([
+    {
+      userId: formingIds[0]!,
+      subject: 'متى تبدأ الجمعية؟',
+      body: 'انضممت قبل يومين ولم تكتمل الجمعية بعد.',
+    },
+    {
+      userId: formingIds[1]!,
+      subject: 'Change my payout spot?',
+      body: 'Can I bid for an earlier month?',
+    },
+  ])
+  .onConflictDoNothing();
 
 clock.set(null);
 const statuses = await db.select({ id: circles.id, status: circles.status }).from(circles);
@@ -323,5 +341,11 @@ console.log(
 );
 console.log(
   `  Admin:   ${adminEmail} / ${adminPassword}   TOTP secret: ${totpSecret}  (add to an authenticator app)`,
+);
+console.log(
+  `           Role demos (same password): ${roleAdmins.map((r) => `${r.replace('_reviewer', '')}@sanad.local`).join(', ')}`,
+);
+console.log(
+  '           Dev: the dashboard login can fill the 2FA code for you (DEV_ENDPOINTS=true).',
 );
 await app.close();

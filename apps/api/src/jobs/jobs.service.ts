@@ -26,10 +26,29 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     private readonly scheduler: SchedulerService,
   ) {}
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
     if (!this.env.JOBS_ENABLED) return;
+    // Start in the background: if Redis is down the API must still serve requests (BullMQ keeps
+    // retrying the connection and the scheduler starts once Redis is reachable).
+    void this.start().catch((e: unknown) =>
+      this.logger.error(`scheduler not started: ${e instanceof Error ? e.message : String(e)}`),
+    );
+  }
+
+  private async start(): Promise<void> {
     // In native ESM BullMQ needs ready-made ioredis clients; workers need maxRetriesPerRequest: null.
-    const connection = () => new Redis(this.env.REDIS_URL, { maxRetriesPerRequest: null });
+    let warned = false;
+    const connection = () => {
+      const r = new Redis(this.env.REDIS_URL, { maxRetriesPerRequest: null });
+      r.on('error', (e: Error) => {
+        if (warned) return;
+        warned = true;
+        this.logger.warn(
+          `Redis unreachable (${e.message}) — jobs wait for it. Try "pnpm infra:up".`,
+        );
+      });
+      return r;
+    };
     this.queue = new Queue('sanad', { connection: connection() });
     await this.queue.upsertJobScheduler(
       'tick',

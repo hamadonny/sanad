@@ -5,7 +5,7 @@ export default defineConfig({
   schema: './src/db/schema.ts',
   out: './migrations',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'postgresql://sanad:sanad@localhost:5432/sanad',
+    url: process.env.DATABASE_URL ?? 'postgresql://sanad:sanad@localhost:5433/sanad',
   },
   strict: true,
 });

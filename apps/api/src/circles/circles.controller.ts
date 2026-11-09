@@ -65,7 +65,7 @@ export class CirclesController {
   ) {
     return this.payments.createIntent(
       m.id,
-      { purpose: 'ENTRY_FEE', monthlyFils: kwd(dto.monthlyKwd) },
+      { purpose: 'ORGANIZING_FEE', monthlyFils: kwd(dto.monthlyKwd) },
       key,
     );
   }

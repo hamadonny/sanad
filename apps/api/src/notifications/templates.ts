@@ -16,6 +16,17 @@ export const DEFAULT_TEMPLATES: Record<string, TemplateDef> = {
     ar: { title: 'رمز التحقق', body: 'رمز التحقق الخاص بك في سند: {{code}}. لا تشاركه مع أحد.' },
     en: { title: 'Verification code', body: 'Your Sanad code is {{code}}. Do not share it.' },
   },
+  'contract.sign_otp': {
+    channels: ['sms'],
+    ar: {
+      title: 'رمز توقيع العقد',
+      body: 'رمز توقيع عقد عضوية سند: {{code}}. إدخاله يعني موافقتك على العقد. لا تشاركه.',
+    },
+    en: {
+      title: 'Signing code',
+      body: 'Your Sanad agreement signing code is {{code}}. Entering it means you sign. Do not share it.',
+    },
+  },
   'kyc.approved': {
     channels: ['push'],
     ar: { title: 'تم التحقق من هويتك', body: 'يمكنك الآن الانضمام إلى جمعية.' },
@@ -43,11 +54,11 @@ export const DEFAULT_TEMPLATES: Record<string, TemplateDef> = {
     channels: ['push', 'sms'],
     ar: {
       title: 'أُلغيت الجمعية',
-      body: 'لم تكتمل الجمعية في الوقت المحدد. أُعيد إليك رسم العضوية بالكامل.',
+      body: 'لم تكتمل الجمعية في الوقت المحدد. أُعيد إليك رسم التنظيم بالكامل.',
     },
     en: {
       title: 'Circle cancelled',
-      body: 'The circle did not fill in time. Your membership fee was refunded in full.',
+      body: 'The circle did not fill in time. Your organising fee was refunded in full.',
     },
   },
   'auction.outbid': {
@@ -110,6 +121,17 @@ export const DEFAULT_TEMPLATES: Record<string, TemplateDef> = {
     en: {
       title: 'Payout waiting for your payment',
       body: 'Pay month {{month}} to receive your payout.',
+    },
+  },
+  'payout.topup': {
+    channels: ['push'],
+    ar: {
+      title: 'وصلك مبلغ إضافي',
+      body: 'وصلت دفعة متأخرة لشهر {{month}}، وحُوّل إليك {{amount}} د.ك.',
+    },
+    en: {
+      title: 'More money for your month',
+      body: 'A late payment for month {{month}} arrived: {{amount}} KWD has been sent to you.',
     },
   },
   'holdback.released': {

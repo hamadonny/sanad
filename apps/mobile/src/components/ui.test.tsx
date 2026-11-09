@@ -1,6 +1,7 @@
 import { screen } from '@testing-library/react-native';
 import { renderWithProviders } from '../test/render';
-import { KeyValue, Money } from './ui';
+import { StyleSheet } from 'react-native';
+import { KeyValue, Money, T } from './ui';
 
 describe('money display (spec §9.2)', () => {
   it('shows KWD with 3 decimals and an accessible label — Arabic', async () => {
@@ -23,5 +24,12 @@ describe('money display (spec §9.2)', () => {
     await renderWithProviders(<KeyValue label="الإجمالي" value="100.000 د.ك" testID="kv" />);
     expect(screen.getByText('الإجمالي')).toBeTruthy();
     expect(screen.getByTestId('kv')).toHaveTextContent('100.000 د.ك');
+  });
+
+  it('Arabic text starts on the right: natural alignment with an RTL writing direction', async () => {
+    await renderWithProviders(<T testID="t">نص</T>);
+    const style = StyleSheet.flatten(screen.getByTestId('t').props.style);
+    expect(style.textAlign).toBe('auto');
+    expect(style.writingDirection).toBe('rtl');
   });
 });

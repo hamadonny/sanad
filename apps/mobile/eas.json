@@ -1,0 +1,47 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "base": {
+      "node": "22.20.0",
+      "pnpm": "10.28.0",
+      "env": {
+        "EXPO_PUBLIC_SUPPORT_WHATSAPP": "96599302447",
+        "EXPO_PUBLIC_SUPPORT_PHONE": "+96599302447"
+      }
+    },
+    "development": {
+      "extends": "base",
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "APP_VARIANT": "development" }
+    },
+    "preview": {
+      "extends": "base",
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": { "EXPO_PUBLIC_API_URL": "https://staging-api.sanad.kw" }
+    },
+    "production": {
+      "extends": "base",
+      "autoIncrement": true,
+      "env": { "EXPO_PUBLIC_API_URL": "https://api.sanad.kw" }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "FILL_APPLE_ID_EMAIL",
+        "ascAppId": "FILL_APP_STORE_CONNECT_APP_ID",
+        "appleTeamId": "FILL_APPLE_TEAM_ID"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./secrets/google-play-service-account.json",
+        "track": "internal",
+        "releaseStatus": "draft"
+      }
+    }
+  }
+}

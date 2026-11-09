@@ -30,6 +30,7 @@ export default function Home() {
   const f = useFormat();
   const { c } = useTheme();
   const circles = useQuery({ queryKey: keys.circles, queryFn: api.circles });
+  const pending = useQuery({ queryKey: keys.pendingAddenda, queryFn: api.pendingAddenda });
   const [pay, setPay] = useState<PaymentRequest | null>(null);
 
   const open = (circles.data ?? []).filter((x) => !['CLOSED', 'CANCELLED'].includes(x.status));
@@ -52,10 +53,19 @@ export default function Home() {
   return (
     <Screen refreshing={circles.isRefetching} onRefresh={() => void circles.refetch()}>
       <Banner
-        title={t('home.guaranteeBanner')}
-        body={t('home.guaranteeBody')}
-        testID="guarantee-banner"
+        title={t('home.trustBanner')}
+        body={t('home.trustBody')}
+        testID="trust-banner"
       />
+      {pending.data?.[0] ? (
+        <Card
+          tone="primary"
+          onPress={() => router.push(`/circle/${pending.data[0]}`)}
+          testID="addendum-pending"
+        >
+          <T variant="h2">{t('contract.pendingBanner')}</T>
+        </Card>
+      ) : null}
       {soon ? (
         <Card tone="primary" onPress={() => router.push(`/circle/${soon.id}`)}>
           <T variant="h2">{t('home.upcomingPayout')}</T>
@@ -116,7 +126,7 @@ export default function Home() {
                     date: f.date(x.nextDue.dueDate),
                   })}
                 </T>
-                <Money value={x.nextDue.amount} variant="h2" color={c.primary} />
+                <Money value={x.nextDue.amount} variant="h2" color={c.primaryText} />
               </Row>
               <Button
                 title={t('home.payNow')}

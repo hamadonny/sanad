@@ -10,8 +10,8 @@ const devKey = Buffer.alloc(32, 7).toString('base64');
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   API_PORT: z.coerce.number().int().default(3000),
-  DATABASE_URL: z.string().default('postgresql://sanad:sanad@localhost:5432/sanad'),
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  DATABASE_URL: z.string().default('postgresql://sanad:sanad@localhost:5433/sanad'),
+  REDIS_URL: z.string().default('redis://localhost:6380'),
   JOBS_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
@@ -41,16 +41,41 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+  /**
+   * Dev-only: comma-separated phones that sign in without an SMS code (founder testing until a
+   * real SMS provider arrives in Phase 7). Ignored unless DEV_ENDPOINTS; always empty in production.
+   */
+  DEV_LOGIN_PHONES: z.string().default('+96599302447'),
+  /** Optional chat webhook (Slack/Teams/Discord-compatible) for new API errors. */
+  ALERT_WEBHOOK_URL: z.string().url().optional(),
+  /**
+   * App Store / Play review account: this one phone signs in with REVIEW_CODE instead of an SMS
+   * (also in production, because store reviewers cannot receive Kuwaiti SMS). Leave empty to
+   * disable. Use a number you own and a random 6-digit code; share it only in the review notes.
+   */
+  REVIEW_PHONE: z.string().optional(),
+  REVIEW_CODE: z
+    .string()
+    .regex(/^\d{6}$/)
+    .optional(),
+  /** Apply pending database migrations when the API starts (development only). */
+  MIGRATE_ON_START: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = Omit<
   z.infer<typeof schema>,
+  | 'DEV_LOGIN_PHONES'
   | 'JWT_SECRET'
   | 'ADMIN_JWT_SECRET'
   | 'ENCRYPTION_KEY'
   | 'BLIND_INDEX_KEY'
   | 'PAYMENT_WEBHOOK_SECRET'
 > & {
+  /** Normalised +965 numbers; empty unless dev endpoints are on. */
+  DEV_LOGIN_PHONES: string[];
   JWT_SECRET: string;
   ADMIN_JWT_SECRET: string;
   ENCRYPTION_KEY: string;
@@ -68,6 +93,11 @@ export function loadDotEnv(): void {
       /* not found — try next */
     }
   }
+}
+
+function normalizeKw(raw: string): string {
+  const p = raw.replace(/[\s()-]/g, '');
+  return p.startsWith('+') ? p : p.startsWith('00') ? `+${p.slice(2)}` : `+965${p}`;
 }
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
@@ -92,6 +122,18 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     BLIND_INDEX_KEY: need('BLIND_INDEX_KEY', Buffer.alloc(32, 9).toString('base64')),
     PAYMENT_WEBHOOK_SECRET: need('PAYMENT_WEBHOOK_SECRET', devSecret('webhook')),
     DEV_ENDPOINTS: prod ? false : parsed.DEV_ENDPOINTS,
+    MIGRATE_ON_START: prod ? false : parsed.MIGRATE_ON_START,
+    REVIEW_PHONE:
+      parsed.REVIEW_PHONE && parsed.REVIEW_CODE ? normalizeKw(parsed.REVIEW_PHONE) : undefined,
+    DEV_LOGIN_PHONES:
+      prod || !parsed.DEV_ENDPOINTS
+        ? []
+        : parsed.DEV_LOGIN_PHONES.split(',')
+            .map((p) => p.replace(/[\s()-]/g, ''))
+            .filter((p) => p.length > 0)
+            .map((p) =>
+              p.startsWith('+') ? p : p.startsWith('00') ? `+${p.slice(2)}` : `+965${p}`,
+            ),
   };
   for (const k of ['ENCRYPTION_KEY', 'BLIND_INDEX_KEY'] as const) {
     if (Buffer.from(env[k], 'base64').length !== 32)

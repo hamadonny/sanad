@@ -19,4 +19,29 @@ describe('env', () => {
       /JWT_SECRET must be set/,
     );
   });
+
+  it('dev sign-in phones are normalised in development and never active in production', () => {
+    expect(
+      loadEnv({ NODE_ENV: 'development', DEV_LOGIN_PHONES: '9930 2447, +96550000001' })
+        .DEV_LOGIN_PHONES,
+    ).toEqual(['+96599302447', '+96550000001']);
+    expect(loadEnv({ NODE_ENV: 'development', DEV_ENDPOINTS: 'false' }).DEV_LOGIN_PHONES).toEqual(
+      [],
+    );
+    const k = Buffer.alloc(32, 1).toString('base64');
+    const prod = loadEnv({
+      NODE_ENV: 'production',
+      DEV_ENDPOINTS: 'true',
+      MIGRATE_ON_START: 'true',
+      DEV_LOGIN_PHONES: '+96599302447',
+      JWT_SECRET: 'x'.repeat(32),
+      ADMIN_JWT_SECRET: 'y'.repeat(32),
+      ENCRYPTION_KEY: k,
+      BLIND_INDEX_KEY: k,
+      PAYMENT_WEBHOOK_SECRET: 'z'.repeat(16),
+    });
+    expect(prod.DEV_ENDPOINTS).toBe(false);
+    expect(prod.MIGRATE_ON_START).toBe(false);
+    expect(prod.DEV_LOGIN_PHONES).toEqual([]);
+  });
 });

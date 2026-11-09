@@ -4,12 +4,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, T } from '../../components/ui';
 import { changeLanguage } from '../../lib/i18n';
 import { useTheme } from '../../lib/theme';
+import { track } from '../../lib/telemetry';
 
 /** First launch: language (Arabic default). Labels are shown in both languages on purpose. */
 export default function LanguageScreen() {
   const { c } = useTheme();
   const pick = async (lang: 'ar' | 'en') => {
     await changeLanguage(lang);
+    track('onboarding_language');
     router.replace('/onboarding/welcome');
   };
   return (

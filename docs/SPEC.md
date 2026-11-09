@@ -2,11 +2,18 @@
 
 ## Product & Technical Specification for Claude Code
 
+> **Superseded in part by D-017 (2026-11-09, see DECISIONS.md).** Sanad is an *organiser*, not a
+> guarantor: there is no Guarantee Fund, entry-fee refunds, fund advances, minimum reserve or
+> circuit breaker. Members pay a one-time 3% organising fee; payouts are what was collected for the
+> month (minus bid and holdback), late money is forwarded as a top-up, and defaults are handled by
+> holdback spreading, vacancy redistribution and legal recovery (10% recovery fee). Where this spec
+> and D-017 disagree, D-017 wins.
+
 ---
 
 ## 0. Instructions for Claude Code (read first)
 
-You are building a production-quality mobile app (iOS + Android) with a backend and an admin dashboard for a **guaranteed digital jamiya** (rotating savings group, ROSCA) platform launching in **Kuwait**.
+You are building a production-quality mobile app (iOS + Android) with a backend and an admin dashboard for a **digital jamiya** (rotating savings group, ROSCA) platform launching in **Kuwait**.
 
 Working rules:
 

@@ -28,6 +28,13 @@ class OtpVerifyDto {
   code!: string;
 }
 
+class DevLoginDto {
+  @ApiProperty({ example: '+96599302447' })
+  @IsString()
+  @Length(8, 20)
+  phone!: string;
+}
+
 class RefreshDto {
   @ApiProperty()
   @IsString()
@@ -55,6 +62,14 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   verify(@Body() dto: OtpVerifyDto) {
     return this.auth.verifyOtp(dto.phone, dto.code);
+  }
+
+  /** Development only (404 otherwise): allow-listed phones sign in without an SMS code. */
+  @Post('dev-login')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  devLogin(@Body() dto: DevLoginDto) {
+    return this.auth.devLogin(dto.phone);
   }
 
   @Post('refresh')

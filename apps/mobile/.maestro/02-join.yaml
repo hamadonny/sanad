@@ -7,6 +7,9 @@ name: Join — calculator, agreement, membership fee
 - assertVisible: { id: calc-entry-fee }
 - tapOn: { id: join-continue }
 - tapOn: { id: contract-agree }
+- tapOn: { id: contract-send-code }
+# Development builds prefill the signing code (mock SMS).
+- extendedWaitUntil: { visible: { id: contract-code }, timeout: 10000 }
 - tapOn: { id: contract-sign }
 - extendedWaitUntil:
     visible: { id: payment-total }

@@ -5,8 +5,8 @@
  *
  * Month timeline used here (mirrors the production job order):
  *   1. on-time contributions for month k
- *   2. PAYOUT_DUE(k)  (fund advances anything missing; receiver's own month missing → held)
- *   3. late contributions for month k (repay advances / release a held payout)
+ *   2. PAYOUT_DUE(k)  (pays out what was collected; receiver's own month missing → held)
+ *   3. late contributions for month k (forwarded as top-ups / release a held payout)
  *   4. defaults (members whose behaviour stops at k)
  *   5. replacements scheduled after month k
  */
@@ -22,9 +22,8 @@ import {
   type CircleState,
 } from './circle.js';
 import { commitmentFor, runDraw } from './draw.js';
-import { ACCOUNTS, Ledger } from './ledger.js';
+import { Ledger } from './ledger.js';
 import type { Fils } from './money.js';
-import { minimumReserve } from './risk.js';
 import type { Tier } from './rules.js';
 
 export type Behavior =
@@ -55,10 +54,6 @@ export interface Scenario {
   members: readonly ScenarioMember[];
   seed: string;
   replacements?: readonly ScenarioReplacement[];
-  /** Money already in the pooled fund from other circles (affects release blocking). */
-  otherPoolBalance?: Fils;
-  /** Exposure elsewhere in the pool (affects the minimum reserve). */
-  otherExposure?: Fils;
   /** Post-closing legal recoveries per member. */
   recoveries?: Readonly<Record<string, Fils>>;
   /** Default false: also run REFUND_PAID for every member owed a refund. */
@@ -133,12 +128,7 @@ export class CircleDriver {
   }
 
   /** FORMING → AUCTION → DRAWING → ACTIVE. */
-  form(
-    members: readonly ScenarioMember[],
-    seed: string,
-    opts: { auctionsPaused?: boolean } = {},
-  ): void {
-    const paused = opts.auctionsPaused ?? false;
+  form(members: readonly ScenarioMember[], seed: string): void {
     for (const m of members) {
       this.apply({ type: 'MEMBER_JOINED', memberId: m.id, tier: m.tier });
       this.behaviorOf.set(m.id, m.behavior);
@@ -147,17 +137,15 @@ export class CircleDriver {
       type: 'AUCTION_STARTED',
       at: iso(T0),
       commitment: commitmentFor(seed),
-      priorityAuctionsPaused: paused,
     });
     members.forEach((m, i) => {
-      if (m.bid && !paused) {
+      if (m.bid) {
         this.apply({
           type: 'BID_PLACED',
           memberId: m.id,
           spot: m.bid.spot,
           amount: m.bid.amount,
           at: iso(T0 + (i + 1) * 60_000),
-          priorityAuctionsPaused: false,
         });
       }
     });
@@ -201,9 +189,12 @@ export class CircleDriver {
     }
   }
 
-  close(poolFundBalance: Fils, reserve: Fils, payRefunds = true): void {
-    this.apply({ type: 'CLOSE', poolFundBalance, minimumReserve: reserve });
-    if (!payRefunds) return;
+  close(payRefunds = true): void {
+    this.apply({ type: 'CLOSE' });
+    if (payRefunds) this.payRefunds();
+  }
+
+  payRefunds(): void {
     for (const m of this.state.members) {
       if (m.refundDue > m.refundPaid) this.apply({ type: 'REFUND_PAID', memberId: m.memberId });
     }
@@ -215,10 +206,10 @@ export function runScenario(sc: Scenario): ScenarioResult {
   const d = new CircleDriver(sc.config, ledger, sc.circleId, sc.monthly);
   d.form(sc.members, sc.seed);
   for (let k = 1; k <= d.state.n; k += 1) d.runMonth(k, sc.replacements);
-  const fund = (sc.otherPoolBalance ?? 0n) + ledger.balance(ACCOUNTS.fund);
-  d.close(fund, minimumReserve(sc.config, sc.otherExposure ?? 0n), !sc.skipRefundPayments);
+  d.close(!sc.skipRefundPayments);
   for (const [memberId, amount] of Object.entries(sc.recoveries ?? {})) {
     d.apply({ type: 'RECOVERY', memberId, amount, reference: 'legal-1' });
   }
+  if (!sc.skipRefundPayments) d.payRefunds();
   return { state: d.state, ledger, effects: d.effects, events: d.events };
 }

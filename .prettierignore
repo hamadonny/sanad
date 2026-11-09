@@ -11,3 +11,4 @@ packages/api-client/src/schema.ts
 apps/api/migrations/meta
 .data
 packages/api-client/openapi.json
+apps/admin/next-env.d.ts

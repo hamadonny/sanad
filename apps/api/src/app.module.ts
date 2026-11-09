@@ -1,7 +1,18 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
-import { AdminAuthController, AdminController } from './admin/admin.controller.js';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { SessionThrottlerGuard } from './common/throttler.guard.js';
+import {
+  AdminAuthController,
+  AdminController,
+  PublicContentController,
+} from './admin/admin.controller.js';
+import { AdminViewsService } from './admin/admin-views.service.js';
+import { ContentService } from './admin/content.service.js';
+import { CaseFilesService } from './admin/case-files.service.js';
+import { LegalDocsService } from './contracts/legal-docs.service.js';
+import { TelemetryController } from './telemetry/telemetry.controller.js';
+import { TelemetryService } from './telemetry/telemetry.service.js';
 import { AdminService } from './admin/admin.service.js';
 import { AuditService } from './audit/audit.service.js';
 import { AuthController } from './auth/auth.controller.js';
@@ -37,7 +48,8 @@ const THROTTLE_OFF = process.env.NODE_ENV === 'test';
     DbModule,
     ProvidersModule,
     ThrottlerModule.forRoot({
-      throttlers: [{ ttl: 60_000, limit: 120 }],
+      // Per session (or per IP when signed out); see SessionThrottlerGuard.
+      throttlers: [{ ttl: 60_000, limit: Number(process.env.THROTTLE_PER_MINUTE ?? 300) }],
       skipIf: () => THROTTLE_OFF,
     }),
   ],
@@ -49,11 +61,13 @@ const THROTTLE_OFF = process.env.NODE_ENV === 'test';
     PaymentsController,
     AdminAuthController,
     AdminController,
+    PublicContentController,
+    TelemetryController,
     DevController,
   ],
   providers: [
     { provide: APP_FILTER, useClass: ErrorFilter },
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: SessionThrottlerGuard },
     AuditService,
     SettingsService,
     LedgerRepository,
@@ -72,6 +86,11 @@ const THROTTLE_OFF = process.env.NODE_ENV === 'test';
     SchedulerService,
     JobsService,
     AdminService,
+    AdminViewsService,
+    ContentService,
+    CaseFilesService,
+    LegalDocsService,
+    TelemetryService,
     HealthService,
   ],
 })

@@ -15,6 +15,7 @@ import { errorMessage } from '../lib/errors';
 import { invalidateMoney } from '../lib/query';
 import { useSettings } from '../lib/settings';
 import { Button, Divider, KeyValue, LoadingView, Sheet, T, useFormat } from './ui';
+import { track } from '../lib/telemetry';
 
 export interface PaymentRequest {
   /** Human description shown at the top (e.g. "Month 3 payment"). */
@@ -51,6 +52,7 @@ export function PaymentSheet({
       .create(key)
       .then((i) => {
         setIntent(i);
+        track('payment_started');
         setPhase('review');
       })
       .catch((e: unknown) => {
@@ -73,6 +75,7 @@ export function PaymentSheet({
       }
       await invalidateMoney();
       setPhase('done');
+      track('payment_completed');
       onPaid?.();
     } catch (e) {
       setError(errorMessage(t, e));

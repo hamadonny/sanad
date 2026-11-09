@@ -15,12 +15,8 @@ import {
 } from './messaging.provider.js';
 import { MockPaymentProvider, PAYMENT_PROVIDER } from './payment.provider.js';
 import { CryptoSeedSource, SEED_SOURCE } from './seed.source.js';
-import {
-  LocalEncryptedStorage,
-  PDF_GENERATOR,
-  PlaceholderPdfGenerator,
-  STORAGE_PROVIDER,
-} from './storage.provider.js';
+import { LocalEncryptedStorage, PDF_GENERATOR, STORAGE_PROVIDER } from './storage.provider.js';
+import { PdfKitGenerator } from '../pdf/pdfkit.generator.js';
 
 /** Global infrastructure: env, crypto, clock and every external provider (all mocks). */
 @Global()
@@ -49,7 +45,7 @@ import {
       inject: [ENV, CryptoService],
       useFactory: (env: Env, c: CryptoService) => new LocalEncryptedStorage(env.STORAGE_DIR, c),
     },
-    { provide: PDF_GENERATOR, useFactory: () => new PlaceholderPdfGenerator() },
+    { provide: PDF_GENERATOR, useFactory: () => new PdfKitGenerator() },
     {
       provide: SEED_SOURCE,
       inject: [CryptoService],

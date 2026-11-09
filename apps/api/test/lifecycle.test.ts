@@ -1,6 +1,6 @@
 /**
  * Full lifecycle through the HTTP API (spec §17): FORMING → AUCTION → DRAWING → ACTIVE →
- * CLOSING → CLOSED for each §5.14 worked example, with mock providers, a real Postgres
+ * CLOSING → CLOSED for each organiser-model worked example (D-017), with mock providers, a real Postgres
  * database, the real scheduler tick and a time-travelling clock.
  *
  * Each run is also replayed through the pure core engine (`runScenario`) with the same seed
@@ -9,6 +9,7 @@
 import { defaultConfig } from '@sanad/config';
 import { ACCOUNTS, findSeed, kwd, runScenario, type Behavior, type Fils } from '@sanad/core';
 import { eq, sql } from 'drizzle-orm';
+import { unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CircleStore } from '../src/circles/circle-store.js';
 import { DbService } from '../src/db/db.service.js';
@@ -17,6 +18,7 @@ import { LedgerRepository } from '../src/ledger/ledger.repository.js';
 import { SchedulerService } from '../src/jobs/scheduler.service.js';
 import {
   adminAuth,
+  binary,
   createTestApp,
   dbAvailable,
   idemKey,
@@ -81,14 +83,6 @@ async function runApi(t: TestApp, sc: ApiScenario): Promise<RunResult> {
         .set({ completedCircles: spec.tier })
         .where(eq(trustProfiles.userId, m.id));
   }
-
-  // Launch reserve so revenue releases are not blocked by the 5,000 KWD floor (spec §5.12).
-  const admin = await adminAuth(t, ['finance']);
-  await t.http
-    .post('/admin/fund/capital')
-    .set(admin)
-    .send({ amountFils: String(kwd(20_000)), reference: 'launch-reserve' })
-    .expect(201);
 
   // Deterministic draw that reproduces the example's spot assignment.
   const winners = sc.members.filter((m) => m.bid);
@@ -188,7 +182,7 @@ async function runApi(t: TestApp, sc: ApiScenario): Promise<RunResult> {
       const offers = (await t.http.get('/circles/replacements').set(replacement.auth).expect(200))
         .body as { circleId: string; spot: number; payNow: { fils: string } }[];
       expect(offers).toHaveLength(1);
-      expect(offers[0]!.payNow.fils).toBe(String(kwd(100 + 100 * sc.replacement.afterMonth)));
+      expect(offers[0]!.payNow.fils).toBe(String(kwd(30 + 100 * sc.replacement.afterMonth)));
       await pay(t, replacement, { purpose: 'REPLACEMENT', circleId, spot: offers[0]!.spot });
     }
   }
@@ -235,7 +229,6 @@ async function crossCheck(r: RunResult, sc: ApiScenario) {
     circleId: r.circleId,
     monthly: kwd(100),
     seed,
-    otherPoolBalance: kwd(20_000),
     members: sc.members.map((m) => ({
       id: r.members.get(m.name)!.id,
       tier: m.tier,
@@ -258,14 +251,13 @@ async function crossCheck(r: RunResult, sc: ApiScenario) {
   for (const account of [
     ACCOUNTS.revenue,
     ACCOUNTS.charity,
-    ACCOUNTS.losses,
+    ACCOUNTS.receivablesControl,
     ACCOUNTS.holdbacks,
     ACCOUNTS.refunds,
     ACCOUNTS.pot(r.circleId),
   ]) {
     expect(await r.balance(account), account).toBe(core.ledger.balance(account));
   }
-  expect(await r.balance(ACCOUNTS.fund)).toBe(kwd(20_000) + core.ledger.balance(ACCOUNTS.fund));
   expect(state.stats).toEqual(core.state.stats);
   const db = r.t.get<DbService>(DbService).db;
   const totals = (await db.execute(sql`SELECT SUM(amount_fils)::text AS s FROM ledger_entries`))
@@ -274,7 +266,7 @@ async function crossCheck(r: RunResult, sc: ApiScenario) {
   await r.t.get<LedgerRepository>(LedgerRepository).assertBalanced(db);
 }
 
-describe.skipIf(!dbAvailable)('API lifecycle — §5.14 worked examples', () => {
+describe.skipIf(!dbAvailable)('API lifecycle — organiser-model worked examples', () => {
   let t: TestApp;
   beforeEach(async () => {
     t = await createTestApp();
@@ -286,43 +278,47 @@ describe.skipIf(!dbAvailable)('API lifecycle — §5.14 worked examples', () => 
   it('Example 1 — everyone pays', async () => {
     const sc: ApiScenario = { members: examples(), forceSpots: { B: 2, H: 8 } };
     const r = await runApi(t, sc);
-    expect(await r.payoutTo('A')).toBe(kwd(955));
-    expect(await r.payoutTo('B')).toBe(kwd(900));
-    expect(await r.payoutTo('C')).toBe(kwd(1000));
-    expect(await r.holdbackReleasedTo('B')).toBe(kwd(100));
-    expect(await r.balance(ACCOUNTS.revenue)).toBe(kwd(645));
-    expect(await r.balance(ACCOUNTS.fund)).toBe(kwd(20_000));
+    expect(await r.payoutTo('A')).toBe(kwd(755)); // 1,000 − 45 bid − 200 holdback
+    expect(await r.payoutTo('B')).toBe(kwd(700)); // tier 0: 30% holdback
+    expect(await r.payoutTo('H')).toBe(kwd(1000));
+    expect(await r.holdbackReleasedTo('B')).toBe(kwd(300));
+    expect(await r.balance(ACCOUNTS.revenue)).toBe(kwd(345)); // 300 organising fees + 45 bid
     const refundTotal = (await Promise.all(NAMES.map((n) => r.refundTo(n)))).reduce(
       (a, b) => a + b,
       0n,
     );
-    expect(refundTotal).toBe(kwd(400));
+    expect(refundTotal).toBe(0n);
     // Trust profiles: everyone completed a circle; B (tier 0) moves up.
     const me = await t.http.get('/me').set(r.members.get('B')!.auth).expect(200);
     expect(me.body.trust).toMatchObject({ completedCircles: 1, tier: 1 });
     await crossCheck(r, sc);
   });
 
-  it('Example 2 — post-payout default: fund covers 800, B banned, legal case 800/700', async () => {
+  it('Example 2 — post-payout default: holdback spread, B banned, legal case 800/500', async () => {
     const sc: ApiScenario = {
       members: examples({ B: { behavior: { kind: 'STOPS_AFTER', lastPaidMonth: 2 } } }),
       forceSpots: { B: 2, H: 8 },
     };
     const r = await runApi(t, sc);
-    expect(await r.payoutTo('B')).toBe(kwd(900));
-    expect(await r.balance(ACCOUNTS.revenue)).toBe(kwd(45));
-    expect(await r.balance(ACCOUNTS.fund)).toBe(kwd(20_000 - 100)); // pool absorbs 100
+    expect(await r.payoutTo('B')).toBe(kwd(700));
+    expect(await r.balance(ACCOUNTS.revenue)).toBe(kwd(345));
+    expect(await r.balance(ACCOUNTS.receivablesControl)).toBe(kwd(500));
     const legal = (
       await t.http
         .get('/admin/legal/cases')
         .set(await adminAuth(t, ['legal']))
         .expect(200)
-    ).body as { grossOwedFils: string; netClaimFils: string; userId: string }[];
+    ).body as {
+      id: string;
+      grossOwed: { fils: string };
+      netClaim: { fils: string };
+      userId: string;
+    }[];
     expect(legal).toHaveLength(1);
     expect(legal[0]).toMatchObject({
       userId: r.members.get('B')!.id,
-      grossOwedFils: String(kwd(800)),
-      netClaimFils: String(kwd(700)),
+      grossOwed: { fils: String(kwd(800)) },
+      netClaim: { fils: String(kwd(500)) },
     });
     const me = await t.http.get('/me').set(r.members.get('B')!.auth).expect(200);
     expect(me.body).toMatchObject({ status: 'BANNED', trust: { banned: true, defaults: 1 } });
@@ -333,10 +329,107 @@ describe.skipIf(!dbAvailable)('API lifecycle — §5.14 worked examples', () => 
       .set('Idempotency-Key', idemKey())
       .send({ monthlyKwd: 100 });
     expect(again.status).toBe(403);
+
+    // Admin dashboard views over the same data (Phase 4).
+    const sa = await adminAuth(t);
+    const legalAdmin = await adminAuth(t, ['legal']);
+    const ov = (await t.http.get('/admin/overview').set(sa).expect(200)).body;
+    expect(ov).toMatchObject({
+      openLegalCases: 1,
+      failedDisbursements: 0,
+      revenue: { total: { fils: String(kwd(345)) } },
+      memberShortfall: { fils: String(kwd(500)) },
+      openClaims: { fils: String(kwd(500)) },
+    });
+    expect(ov.monthlyVolume.fils).toMatch(/^\d+$/);
+    const circle = (await t.http.get(`/admin/circles/${r.circleId}`).set(sa).expect(200)).body;
+    expect(circle.roster).toHaveLength(10);
+    expect(circle.schedule).toHaveLength(10);
+    expect(circle.draw.revealedSeed).toMatch(/^[0-9a-f]+$/);
+    expect(circle.ledger.length).toBeGreaterThan(10);
+    const b = r.members.get('B')!;
+    const member = (await t.http.get(`/admin/members/${b.id}`).set(sa).expect(200)).body;
+    expect(member).toMatchObject({
+      user: { status: 'BANNED' },
+      tier: null,
+      trust: { defaults: 1 },
+    });
+    expect(member.payments.length).toBeGreaterThan(0);
+    const caseId = legal[0]!.id as string;
+    const file = (await t.http.get(`/admin/legal/cases/${caseId}/file`).set(legalAdmin).expect(200))
+      .body;
+    expect(file.member.civilIdNumber).toMatch(/^\d{12}$/);
+    expect(file.contract).not.toBeNull();
+    expect(file.payouts[0]).toMatchObject({ kind: 'POT', status: 'SENT' });
+    expect(file.schedule).toHaveLength(10);
+    const audit = (await t.http.get('/admin/audit?action=legal.').set(sa).expect(200)).body;
+    expect(audit.map((a: { action: string }) => a.action)).toContain('legal.case_file');
+    // finance-only exports; legal cannot export, viewer cannot read case files
+    const fin = await adminAuth(t, ['finance']);
+    const csv = await t.http.get('/admin/export/ledger').set(fin).expect(200);
+    expect(csv.headers['content-type']).toContain('text/csv');
+    expect(csv.text.split('\r\n')[0]).toContain('seq,created_at,type');
+    await t.http.get('/admin/export/ledger').set(legalAdmin).expect(403);
+    const revenue = (await t.http.get('/admin/finance/revenue').set(fin).expect(200)).body;
+    expect(revenue.rows).toHaveLength(1);
+    // Sanad earns its fees either way; members bear what B's holdback did not cover.
+    expect(revenue.rows[0]).toMatchObject({
+      organizingFees: { fils: String(kwd(300)) },
+      bidRevenue: { fils: String(kwd(45)) },
+      revenue: { fils: String(kwd(345)) },
+      holdbacksApplied: { fils: String(kwd(300)) },
+      memberShortfall: { fils: String(kwd(500)) },
+    });
+    await t.http
+      .get(`/admin/legal/cases/${caseId}/file`)
+      .set(await adminAuth(t, ['viewer']))
+      .expect(403);
+    // Phase 5: addendum acknowledged by the member; case file as PDF and ZIP.
+    const add = (await t.http.get(`/circles/${r.circleId}/addendum`).set(b.auth).expect(200)).body;
+    expect(add).toMatchObject({ spot: 2, months: 10, acknowledged: false });
+    expect(add.expectedPayout.fils).toBe(String(kwd(700)));
+    await t.http
+      .post(`/circles/${r.circleId}/addendum/ack`)
+      .set(b.auth)
+      .send({ documentHash: 'f'.repeat(64) })
+      .expect(422);
+    const acked = (
+      await t.http
+        .post(`/circles/${r.circleId}/addendum/ack`)
+        .set(b.auth)
+        .send({ documentHash: add.documentHash })
+        .expect(200)
+    ).body;
+    expect(acked.acknowledged).toBe(true);
+    const addPdf = await t.http
+      .get(`/circles/${r.circleId}/addendum/pdf`)
+      .set(b.auth)
+      .buffer(true)
+      .parse(binary)
+      .expect(200);
+    expect((addPdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+    const casePdf = await t.http
+      .get(`/admin/legal/cases/${caseId}/file.pdf`)
+      .set(legalAdmin)
+      .buffer(true)
+      .parse(binary)
+      .expect(200);
+    expect((casePdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+    const zip = await t.http
+      .get(`/admin/legal/cases/${caseId}/file.zip`)
+      .set(legalAdmin)
+      .buffer(true)
+      .parse(binary)
+      .expect(200);
+    const names = Object.keys(unzipSync(new Uint8Array(zip.body as Buffer)));
+    expect(names).toEqual(
+      expect.arrayContaining(['case-file.pdf', 'case-file.json', 'signed/sanad-contract-v1.pdf']),
+    );
+    expect(names.some((n) => n.startsWith('signed/sanad-addendum-'))).toBe(true);
     await crossCheck(r, sc);
   });
 
-  it('Example 3 — pre-payout default: H refunded 400, revenue 745', async () => {
+  it('Example 3 — pre-payout default: H refunded 400, revenue 345', async () => {
     const sc: ApiScenario = {
       members: examples({ H: { behavior: { kind: 'STOPS_AFTER', lastPaidMonth: 4 } } }),
       forceSpots: { B: 2, H: 8 },
@@ -344,8 +437,12 @@ describe.skipIf(!dbAvailable)('API lifecycle — §5.14 worked examples', () => 
     const r = await runApi(t, sc);
     expect(await r.payoutTo('H')).toBeUndefined();
     expect(await r.refundTo('H')).toBe(kwd(400));
-    expect(await r.balance(ACCOUNTS.revenue)).toBe(kwd(745));
-    expect(await r.balance(ACCOUNTS.fund)).toBe(kwd(20_000));
+    expect(await r.balance(ACCOUNTS.revenue)).toBe(kwd(345));
+    // months 5–7 were paid 900 and then topped up from month 8's pot
+    const db = t.get<DbService>(DbService).db;
+    const topUps = await db.select().from(payouts).where(eq(payouts.kind, 'TOP_UP'));
+    expect(topUps.map((p) => p.amountFils)).toEqual([kwd(100), kwd(100), kwd(100)]);
+    expect(topUps.every((p) => p.status === 'SENT')).toBe(true);
     await crossCheck(r, sc);
   });
 
@@ -358,8 +455,8 @@ describe.skipIf(!dbAvailable)('API lifecycle — §5.14 worked examples', () => 
     const r = await runApi(t, sc);
     expect(await r.payoutTo('R')).toBe(kwd(1000));
     expect(await r.refundTo('H')).toBe(kwd(400));
-    expect(await r.refundTo('R')).toBe(kwd(100));
-    expect(await r.balance(ACCOUNTS.revenue)).toBe(kwd(745));
+    expect(await r.refundTo('R')).toBe(0n);
+    expect(await r.balance(ACCOUNTS.revenue)).toBe(kwd(375)); // + 30 replacement fee
     await crossCheck(r, sc);
   });
 
@@ -381,9 +478,9 @@ describe.skipIf(!dbAvailable)('API lifecycle — §5.14 worked examples', () => 
       forceSpots: { A: 1, D: 3 },
     };
     const r = await runApi(t, sc);
-    expect(await r.payoutTo('A')).toBe(kwd(900)); // tier 0 → 10% holdback
-    expect(await r.payoutTo('D')).toBe(kwd(950)); // tier 1 → 5% holdback
-    expect(await r.balance(ACCOUNTS.revenue)).toBe(kwd(600));
+    expect(await r.payoutTo('A')).toBe(kwd(700)); // tier 0 → 30% holdback
+    expect(await r.payoutTo('D')).toBe(kwd(750)); // tier 1 → 25% holdback
+    expect(await r.balance(ACCOUNTS.revenue)).toBe(kwd(300));
     await crossCheck(r, sc);
   });
 });
@@ -398,7 +495,7 @@ describe.skipIf(!dbAvailable)('API lifecycle — forming, leaving, cancellation,
     await t?.close();
   });
 
-  it('leaving during FORMING refunds the entry fee in full', async () => {
+  it('leaving during FORMING refunds the organising fee in full', async () => {
     const m = await signUp(t, 'Leaver One');
     await pay(t, m, { monthlyKwd: 100 }, '/circles/queue');
     const list = (await t.http.get('/circles').set(m.auth).expect(200)).body as {
@@ -407,7 +504,7 @@ describe.skipIf(!dbAvailable)('API lifecycle — forming, leaving, cancellation,
     }[];
     expect(list[0]!.joined).toBe(1);
     await t.http.delete(`/circles/queue/${list[0]!.id}`).set(m.auth).expect(204);
-    expect(await refundSum(t, m.id)).toBe(kwd(100));
+    expect(await refundSum(t, m.id)).toBe(kwd(30));
     expect(t.gateway.transfers.filter((x) => x.kind === 'refund')).toHaveLength(1);
   });
 
@@ -419,8 +516,8 @@ describe.skipIf(!dbAvailable)('API lifecycle — forming, leaving, cancellation,
     t.clock.advance(15 * 86_400_000);
     const r = await t.get<SchedulerService>(SchedulerService).tick();
     expect(r.cancelled).toBe(1);
-    expect(await refundSum(t, a.id)).toBe(kwd(50));
-    expect(await refundSum(t, b.id)).toBe(kwd(50));
+    expect(await refundSum(t, a.id)).toBe(kwd(15)); // 3% of a 500 KWD pot
+    expect(await refundSum(t, b.id)).toBe(kwd(15));
   });
 
   it('tier 0 cannot join above 100 KWD; contract must be signed first', async () => {
@@ -444,7 +541,7 @@ describe.skipIf(!dbAvailable)('API lifecycle — forming, leaving, cancellation,
         monthly: { kwd: string };
         available: boolean;
         blockers: string[];
-        refundBySpot: { refund: { kwd: string } }[];
+        organizingFee: { kwd: string };
       }[];
     };
     expect(options.options.map((o) => [o.monthly.kwd, o.available])).toEqual([
@@ -453,18 +550,7 @@ describe.skipIf(!dbAvailable)('API lifecycle — forming, leaving, cancellation,
       ['250.000', false],
       ['500.000', false],
     ]);
-    expect(options.options[1]!.refundBySpot.map((x) => x.refund.kwd)).toEqual([
-      '0.000',
-      '0.000',
-      '0.000',
-      '0.000',
-      '0.000',
-      '50.000',
-      '50.000',
-      '100.000',
-      '100.000',
-      '100.000',
-    ]);
+    expect(options.options[1]!.organizingFee.kwd).toBe('30.000');
   });
 
   it('payment intents are idempotent and webhooks are verified and replay-safe', async () => {
@@ -491,7 +577,7 @@ describe.skipIf(!dbAvailable)('API lifecycle — forming, leaving, cancellation,
       eventId: 'evt1',
       providerRef: `mockch_${id}`,
       paymentId: id,
-      amount: kwd(100),
+      amount: kwd(30),
       paidAt: t.clock.now().toISOString(),
     };
     const { body } = t.gateway.buildWebhook(event);

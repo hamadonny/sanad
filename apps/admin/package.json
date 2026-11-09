@@ -14,13 +14,15 @@
     "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\""
   },
   "dependencies": {
+    "@sanad/api-client": "workspace:*",
     "@sanad/config": "workspace:*",
     "@sanad/core": "workspace:*",
     "@sanad/i18n": "workspace:*",
     "@sanad/ui-tokens": "workspace:*",
     "next": "^16.4.5",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

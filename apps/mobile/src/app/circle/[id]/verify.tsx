@@ -17,6 +17,7 @@ import {
 import { api } from '../../../lib/api';
 import { keys } from '../../../lib/query';
 import { useTheme } from '../../../lib/theme';
+import { track } from '../../../lib/telemetry';
 
 /** "Verify fairness" (spec §5.7): recomputes SHA-256 and the HMAC Fisher–Yates draw on-device. */
 export default function VerifyScreen() {
@@ -34,6 +35,7 @@ export default function VerifyScreen() {
 
   const run = () => {
     if (!d.revealedSeed || !d.commitment) return;
+    track('draw_verified');
     setResult(
       verifyDraw({
         seed: d.revealedSeed,

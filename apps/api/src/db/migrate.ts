@@ -19,7 +19,7 @@ export async function runMigrations(databaseUrl: string): Promise<void> {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const url = process.env.DATABASE_URL ?? 'postgresql://sanad:sanad@localhost:5432/sanad';
+  const url = process.env.DATABASE_URL ?? 'postgresql://sanad:sanad@localhost:5433/sanad';
   runMigrations(url)
     .then(() => console.log('migrations applied'))
     .catch((e: unknown) => {

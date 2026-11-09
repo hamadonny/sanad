@@ -6,6 +6,7 @@ import {
   Headers,
   HttpCode,
   Inject,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
@@ -24,6 +25,11 @@ import { ENV, type Env } from '../config/env.js';
 import { money } from '../common/money.js';
 import { PDF_GENERATOR, type PdfGenerator } from '../providers/storage.provider.js';
 import { PaymentsService } from './payments.service.js';
+import { eq } from 'drizzle-orm';
+import { DbService } from '../db/db.service.js';
+import { users } from '../db/schema.js';
+import { receiptDoc } from '../pdf/documents.js';
+import { sendPdf } from '../common/send-file.js';
 
 class IntentDto {
   @ApiProperty({ enum: ['CONTRIBUTION', 'REPLACEMENT'] })
@@ -56,6 +62,7 @@ export class PaymentsController {
     private readonly payments: PaymentsService,
     @Inject(ENV) private readonly env: Env,
     @Inject(PDF_GENERATOR) private readonly pdf: PdfGenerator,
+    private readonly dbs: DbService,
   ) {}
 
   /** Pay a monthly contribution (now or in advance) or take over a vacated spot. */
@@ -98,15 +105,29 @@ export class PaymentsController {
     @Res() res: Response,
   ) {
     const p = await this.payments.get(m.id, id);
-    const pdf = await this.pdf.render('receipt', {
-      id: p.id,
-      amount: money(p.amountFils).kwd,
-      status: p.status,
-      date: p.succeededAt?.toISOString() ?? '',
-    });
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="sanad-receipt-${p.id}.pdf"`);
-    res.send(pdf);
+    if (!['SUCCEEDED', 'APPLIED', 'REFUNDED', 'REFUND_REQUIRED'].includes(p.status))
+      throw new NotFoundException({
+        code: 'NOT_PAID',
+        message: 'no receipt for an unpaid payment',
+      });
+    const [u] = await this.dbs.db.select().from(users).where(eq(users.id, m.id));
+    const pdf = await this.pdf.render(
+      receiptDoc({
+        id: p.id,
+        purpose: p.purpose,
+        circleId: p.circleId,
+        month: p.month,
+        amount: money(p.amountFils),
+        penalty: money(p.penaltyFils),
+        status: p.status,
+        paidAt: p.succeededAt,
+        createdAt: p.createdAt,
+        memberName: u?.fullNameAr ?? u?.fullNameEn ?? '—',
+        phoneMasked: u ? `${u.phone.slice(0, 4)}••••${u.phone.slice(-4)}` : '—',
+        providerRef: p.providerRef,
+      }),
+    );
+    sendPdf(res, pdf, `sanad-receipt-${p.id.slice(0, 8)}.pdf`);
   }
 
   /** DEV ONLY: confirm a mock payment as if the member paid at the gateway. */

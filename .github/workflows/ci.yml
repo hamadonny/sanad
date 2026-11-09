@@ -53,6 +53,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Dependency audit (production dependencies, high severity)
+        run: pnpm audit --prod --audit-level=high
+
       - name: OpenAPI client is up to date
         run: |
           pnpm --filter @sanad/api openapi

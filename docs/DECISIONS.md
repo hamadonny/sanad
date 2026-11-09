@@ -132,3 +132,139 @@ available for request typing and documentation.
 - Draw verification runs @sanad/core `verifyDraw` on the phone.
 - API: CORS enabled for browsers in development (admin dashboard, web preview); production
   uses `CORS_ORIGINS`.
+
+## D-012 — Brand (founder, 2026-11-08)
+
+- Palette: Cream #fffcf2 · Stone #ccc5b9 · Olive #403d39 · Ink #252422 · Flame #eb5e28
+  (tokens in `packages/ui-tokens`). AA contrast: Ink text on Flame buttons; orange text uses
+  #b8461a (light) / #f39a74 (dark).
+- Typeface: Readex Pro (Arabic + Latin in one family), 400/500/700, bundled in the app via
+  `@expo-google-fonts/readex-pro`.
+- Logo: the keystone arch (the orange keystone = the Guarantee Fund) as app icon; wordmark «سند»
+  with the dot of «ن» in Flame for splash/documents. Sources in `docs/brand/` (SVG) and the
+  brand board `docs/brand/brand-board.html`.
+- Support contact: +965 9930 2447 (WhatsApp and phone).
+
+## D-013 — Development sign-in while SMS is mocked (founder, 2026-11-08)
+
+- Real SMS arrives with Phase 7, so on a phone the mock code was unreachable. In development
+  (`DEV_ENDPOINTS=true`) `POST /auth/otp/request` now returns `devCode`; the app shows it and
+  fills it in.
+- `DEV_LOGIN_PHONES` (default `+96599302447`, the founder) sign in without any code through
+  `POST /auth/dev-login`. Production forces `DEV_ENDPOINTS=false`, which empties the list and
+  makes the endpoint 404 (tested).
+- The API applies pending migrations on start in development (`MIGRATE_ON_START`); never in
+  production, where migrations stay an explicit deploy step.
+- Database outages return 503 `DATABASE_UNAVAILABLE` / `DATABASE_NOT_MIGRATED` with a
+  translated message instead of a generic 500. Error logs no longer include Drizzle's query
+  parameters (they can contain phone numbers).
+- Phone field hint is `XXXX XXXX`: Kuwaiti mobiles start with 4, 5, 6 or 9 (validation already
+  accepted all four).
+
+## D-014 — Admin dashboard architecture (Phase 4)
+
+- Next.js App Router with server components; no client-side data fetching. The API's admin
+  token pair is stored in two httpOnly, SameSite=strict cookies; the Next server calls the API
+  with it. `src/proxy.ts` refreshes the access token before it expires, with a single-flight
+  guard per refresh token (the API rotates refresh tokens and revokes the family on reuse).
+- Every mutation is a server action → API endpoint, so role checks and the audit log stay in
+  one place (the API). The dashboard hides sections a role cannot use (`lib/nav.ts`), but the
+  API is the gate. Dangerous actions (ban, capital, recoveries, config, contracts) need a
+  confirmation tick.
+- Viewers are read-only (API rejects non-GET) and see masked phone numbers.
+- New read models live in `AdminViewsService`; admin response types in
+  `@sanad/api-client/admin.ts` (D-010).
+- Content: notification templates are editable except the OTP SMS (security); placeholders are
+  validated against the defaults. Publishing a contract version makes every member re-sign
+  before their next join [LEGAL]. FAQ moved to a `faq_items` table (seeded from the app's
+  bundled FAQ, which stays as the offline fallback); the app reads `GET /content/faq`.
+- Legal case file: `GET /admin/legal/cases/:id/file` returns everything spec §8 lists (identity
+  read is audited); the dashboard renders a printable page. PDF + ZIP come in Phase 5.
+- CSV exports (ledger, balances, revenue) are UTF-8 with BOM (Arabic in Excel) and neutralise
+  spreadsheet formulas.
+- Dev only: `GET /dev/admin-totp` lets the login page fill the 2FA code for demo accounts.
+- Mobile RTL fix: on iOS, React Native treats `textAlign: 'left'/'right'` on Text as start/end
+  inside an RTL layout, so Arabic text appeared on the left. Text now uses `textAlign: 'auto'`
+  (natural = right in Arabic) on native; web keeps the physical side.
+
+## D-015 — Contracts, e-signature and PDFs (Phase 5)
+
+- **Placeholders until the founder uploads** [LEGAL][SHARIAH]: the contract text stays the
+  placeholder (v1). The founder later (1) publishes the lawyer's final text as a new version
+  (Content → Contract versions) and (2) uploads the lawyer's file and the Shariah review
+  (Content → Legal & Shariah documents, `legal` role). Until then the app, the admin overview
+  ("Launch readiness") and every contract PDF say the text is a placeholder and the Shariah
+  review is not uploaded. Approved Shariah reviews can be downloaded by members.
+- **E-signature**: agreement → SMS signing code (purpose `CONTRACT_SIGN`, separate from login
+  codes in both directions) → signature row with the OTP reference, IP, device and text hash →
+  signed PDF stored (encrypted) with its SHA-256. The signing SMS template cannot be edited.
+- **Addendum** (after the draw): spot, payout date, holdback, bid and the full schedule; its
+  hash covers all of these. The member confirms it with Face ID / fingerprint; a changed
+  schedule needs a new confirmation. PDF stored on confirmation.
+- **PDFs**: PDFKit with the embedded Readex Pro font. Arabic shaping comes from fontkit; we do
+  the right-to-left word order ourselves (`layoutLine`, unit-tested), with Latin/number runs kept
+  left-to-right and brackets mirrored. Documents are built as data (`src/pdf/documents.ts`) and
+  rendered by the `PdfGenerator` provider, so a designer's template can replace the renderer.
+  Arabic first, English translation after ("the Arabic text prevails").
+- **Receipts**: bilingual PDF, only for paid payments; late penalties shown as going to charity.
+- **Legal case file**: PDF and ZIP (PDF, JSON data, signed contract/addendum PDFs, identity
+  documents). Every download is audited.
+- **Fix**: the join list no longer locks amounts when the agreement is unsigned or outdated
+  (signing is part of the join flow); joining itself still requires the current signature.
+
+## D-016 — Hardening choices (Phase 6)
+
+- Monitoring and analytics are **self-hosted** (Sanad's own database), not a third-party SDK:
+  fewer data-residency questions, no trackers in the app, nothing to disclose as "shared".
+  Analytics are anonymous daily counts of 14 known events; members can switch them off.
+- Rate limiting is per signed-in session (per IP when signed out) because Kuwaiti carriers
+  use carrier-grade NAT.
+- Store review account (`REVIEW_PHONE` / `REVIEW_CODE`) is the only way to sign in without an
+  SMS in production; empty by default.
+- Store submission waits for Phase 7: Apple and Google reject simulated payments. Internal
+  testing (TestFlight / Play internal track) is possible as soon as the developer accounts exist.
+- Full findings and measurements: `docs/HARDENING.md`; store material: `docs/store/`.
+
+## D-017 — Founding business model: organiser fee, no guarantee (founder, 2026-11-09)
+
+Settled before launch; **never changed later, only added to** (founder's rule).
+
+- **No guarantee.** Sanad does not cover members who stop paying. There is no Guarantee Fund,
+  no fund advances, no completion refunds, no circuit breaker on a fund ratio, no revenue release.
+- **Organising fee: 3% of the pot per member**, paid when joining, held until the draw (refunded
+  if the member leaves while the circle is forming or the circle never fills), earned at the draw.
+- **Early-spot auction kept** (spots 1–3; minimum bids 30/20/10% of the monthly amount) [SHARIAH].
+- **Members' payout = what the group actually paid in for that month** (minus the recipient's bid
+  and holdback). Late money is forwarded to that month's recipient when it arrives.
+- **Holdback** (the member's own money, returned at the end) on spots 1–3: 30% tier 0, 25% tier 1,
+  20% tier 2.
+- **Post-payout default:** the defaulter's holdback is spread equally over every month they still
+  owe; the rest is a shortfall borne equally by those months' recipients. Sanad pursues it legally
+  for the group; recoveries are paid to the affected members, minus the recovery fee.
+- **Pre-payout default (vacant spot):** the vacant spot's own pot pays its missing contributions
+  to the other members, and the defaulter gets back what they paid in (minus any charity
+  penalty). A replacement member can take the spot: they pay the months so far (catch-up) plus
+  the replacement fee.
+- **Fee schedule (D), all configurable in the dashboard:** replacement fee 3% of pot, recovery
+  fee 10% of amounts recovered [SHARIAH], spot exchange 1% of pot per party, fast payout 2 KWD,
+  private circle setup 5 KWD, company circles 1 KWD per employee per circle.
+- Late penalties (off by default) still go to charity.
+- A future optional "Protection" product may add a guarantee as an add-on.
+
+**Engine details settled while building D-017** (packages/core `circle.ts`, property-tested over
+40,000 random circles):
+
+- A short month pays the recipient's **bid first, then their holdback, then the recipient**; later
+  money for that month follows the same order and is sent as a top-up.
+- A recipient who has not paid their own month is still **held** until they pay or default.
+- A defaulter's holdback is split **as equally as possible** (fils remainder to the earliest
+  months); any holdback beyond what they owe is refunded to them.
+- A recovery reduces the defaulter's debt by the **full amount**; the members receive it minus the
+  10% recovery fee.
+- Money arriving for a defaulted recipient's own month pays down their debt (it is not sent to them).
+- When several spots are vacant at once, money is never spent on a vacant month; anything left
+  after repairing the missing months and refunding the defaulters' own payments goes back
+  equally to the active members (refund kind `EXCESS_PAYMENT`).
+- Refund rows are created as soon as money is due (`REFUND_DUE`), not at closing.
+- Payment purpose `ENTRY_FEE` is renamed `ORGANIZING_FEE`; config `schemaVersion` is 2. Existing
+  development databases must be reset.

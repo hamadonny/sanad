@@ -149,7 +149,7 @@ describe.skipIf(!dbAvailable)('scheduled jobs are idempotent', () => {
       eventId: 'e',
       providerRef: `mockch_${id}`,
       paymentId: id,
-      amount: 100_000n,
+      amount: 30_000n, // 3% organising fee of a 1,000 KWD pot
       paidAt: t.clock.now().toISOString(),
     });
     await Promise.all([
@@ -167,7 +167,7 @@ describe.skipIf(!dbAvailable)('scheduled jobs are idempotent', () => {
     const db = t.get<DbService>(DbService).db;
     const joins = (
       await db.execute(
-        sql`SELECT count(*)::int AS n FROM ledger_transactions WHERE type = 'ENTRY_FEE_PAID' AND member_id = ${m.id}`,
+        sql`SELECT count(*)::int AS n FROM ledger_transactions WHERE type = 'FEE_PAID' AND member_id = ${m.id}`,
       )
     ).rows as { n: number }[];
     expect(joins[0]!.n).toBe(1);

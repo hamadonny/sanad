@@ -1,4 +1,4 @@
-import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { ENV, type Env } from '../config/env.js';
@@ -15,6 +15,11 @@ export class DbService implements OnModuleDestroy {
 
   constructor(@Inject(ENV) env: Env) {
     this.pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: 10 });
+    // An idle connection dropped by the server (restart, failover) must not crash the process;
+    // the pool replaces it on the next query. Only the code is logged (no query parameters).
+    this.pool.on('error', (e: Error & { code?: string }) =>
+      new Logger('Db').warn(`idle database connection closed (${e.code ?? e.name})`),
+    );
     this.db = drizzle(this.pool, { schema });
   }
 

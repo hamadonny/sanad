@@ -23,6 +23,27 @@ describe.skipIf(!dbAvailable)('auth, profile, KYC, contracts', () => {
     expect(r.body.code).toBe('INVALID_CODE');
   });
 
+  it('dev mode: returns the mock code, and allow-listed phones sign in without one', async () => {
+    const r = await t.http.post('/auth/otp/request').send({ phone: '50000052' }).expect(200);
+    expect(r.body.devCode).toMatch(/^\d{6}$/);
+    expect(t.sms.lastTo('+96550000052')).toContain(r.body.devCode as string);
+    await t.http
+      .post('/auth/otp/verify')
+      .send({ phone: '+96550000052', code: r.body.devCode })
+      .expect(200);
+
+    const d = await t.http.post('/auth/otp/request').send({ phone: '9930 2447' }).expect(200);
+    expect(d.body).toMatchObject({ devLogin: true });
+    expect(d.body.devCode).toBeUndefined();
+    const s = await t.http.post('/auth/dev-login').send({ phone: '+96599302447' }).expect(200);
+    await t.http
+      .get('/me')
+      .set('Authorization', `Bearer ${s.body.accessToken as string}`)
+      .expect(200);
+    const no = await t.http.post('/auth/dev-login').send({ phone: '+96550000052' }).expect(403);
+    expect(no.body.code).toBe('DEV_LOGIN_NOT_ALLOWED');
+  });
+
   it('rate-limits OTP requests per phone', async () => {
     for (let i = 0; i < 5; i += 1)
       await t.http.post('/auth/otp/request').send({ phone: '+96560000002' }).expect(200);

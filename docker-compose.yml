@@ -1,4 +1,6 @@
 # Local development infrastructure. Usage: `pnpm infra:up` / `pnpm infra:down`.
+# Host ports are 5433 / 6380 / 1026 / 8026 (not the defaults) so Sanad does not collide with
+# other projects or a Postgres/Redis installed directly on the computer.
 name: sanad
 
 services:
@@ -11,7 +13,7 @@ services:
       TZ: UTC
       PGTZ: UTC
     ports:
-      - '5432:5432'
+      - '5433:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +26,7 @@ services:
     image: redis:7-alpine
     command: ['redis-server', '--appendonly', 'yes']
     ports:
-      - '6379:6379'
+      - '6380:6379'
     volumes:
       - redis-data:/data
     healthcheck:
@@ -36,8 +38,8 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     ports:
-      - '1025:1025' # SMTP
-      - '8025:8025' # Web UI → http://localhost:8025
+      - '1026:1025' # SMTP
+      - '8026:8025' # Web UI → http://localhost:8026
 
 volumes:
   postgres-data:

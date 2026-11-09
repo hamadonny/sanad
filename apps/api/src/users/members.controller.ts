@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Res,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
@@ -33,6 +34,10 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { Throttle } from '@nestjs/throttler';
+import type { Response } from 'express';
+import { sendPdf } from '../common/send-file.js';
+import { matchesDeclared } from '../common/file-type.js';
 import { ClientIp, CurrentMember, MemberGuard, type MemberPrincipal } from '../auth/guards.js';
 import { notFound, unprocessable } from '../common/errors.js';
 import { ContractsService } from '../contracts/contracts.service.js';
@@ -61,6 +66,17 @@ class KycSubmissionDto {
 
 class SignContractDto {
   @ApiProperty() @Type(() => Number) @IsInt() @Min(1) version!: number;
+  @ApiProperty({ example: '123456' }) @Matches(/^\d{6}$/) code!: string;
+}
+
+class SignRequestDto {
+  @ApiProperty() @Type(() => Number) @IsInt() @Min(1) version!: number;
+  @ApiPropertyOptional({ enum: ['ar', 'en'] }) @IsOptional() @IsIn(['ar', 'en']) language?:
+    'ar' | 'en';
+}
+
+class AckDto {
+  @ApiProperty() @Matches(/^[0-9a-f]{64}$/) documentHash!: string;
 }
 
 class DeviceDto {
@@ -126,7 +142,7 @@ export class MembersController {
   ) {
     const pick = (k: 'front' | 'back' | 'selfie') => {
       const f = files[k]?.[0];
-      if (f && !IMAGE_TYPES.includes(f.mimetype))
+      if (f && (!IMAGE_TYPES.includes(f.mimetype) || !matchesDeclared(f.buffer, f.mimetype)))
         throw unprocessable('INVALID_FILE', `${k} must be an image`);
       return f;
     };
@@ -143,21 +159,22 @@ export class MembersController {
   }
 
   @Get('contracts/current')
-  async currentContract(@CurrentMember() m: MemberPrincipal) {
-    const c = await this.contracts.current();
-    return {
-      version: c.version,
-      titleAr: c.titleAr,
-      titleEn: c.titleEn,
-      bodyAr: c.bodyAr,
-      bodyEn: c.bodyEn,
-      sha256: c.sha256,
-      signed: await this.contracts.hasSignedCurrent(m.id),
-    };
+  currentContract(@CurrentMember() m: MemberPrincipal) {
+    return this.contracts.view(m.id);
   }
 
+  /** E-signature step 1: SMS a signing code to the member's phone (dev: returned as devCode). */
+  @Post('contracts/sign/request')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  signRequest(@CurrentMember() m: MemberPrincipal, @Body() dto: SignRequestDto) {
+    return this.contracts.requestSignCode(m.id, dto.version, dto.language ?? 'ar');
+  }
+
+  /** E-signature step 2: the code signs this exact version; a signed PDF is stored. */
   @Post('contracts/sign')
   @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   sign(
     @CurrentMember() m: MemberPrincipal,
     @Body() dto: SignContractDto,
@@ -165,11 +182,67 @@ export class MembersController {
     @Headers('user-agent') ua?: string,
     @Headers('x-device-id') deviceId?: string,
   ) {
-    return this.contracts.sign(m.id, dto.version, {
+    return this.contracts.sign(m.id, dto.version, dto.code, {
       ip,
       userAgent: ua ?? null,
       deviceId: deviceId ?? null,
     });
+  }
+
+  @Get('contracts/signatures')
+  signatures(@CurrentMember() m: MemberPrincipal) {
+    return this.contracts.signatures(m.id);
+  }
+
+  @Get('contracts/signatures/:id/pdf')
+  async signaturePdf(
+    @CurrentMember() m: MemberPrincipal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ) {
+    const f = await this.contracts.signaturePdf(id, m.id);
+    sendPdf(res, f.data, f.filename);
+  }
+
+  @Get('contracts/pending-addenda')
+  pendingAddenda(@CurrentMember() m: MemberPrincipal) {
+    return this.contracts.pendingAddenda(m.id);
+  }
+
+  /** Post-draw addendum: the member's spot, payout date and full schedule (spec §8). */
+  @Get('circles/:id/addendum')
+  addendum(@CurrentMember() m: MemberPrincipal, @Param('id', ParseUUIDPipe) id: string) {
+    return this.contracts.addendum(m.id, id);
+  }
+
+  @Post('circles/:id/addendum/ack')
+  @HttpCode(200)
+  acknowledge(
+    @CurrentMember() m: MemberPrincipal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AckDto,
+    @ClientIp() ip: string | null,
+    @Headers('user-agent') ua?: string,
+    @Headers('x-device-id') deviceId?: string,
+  ) {
+    return this.contracts.acknowledgeAddendum(m.id, id, dto.documentHash, {
+      ip,
+      userAgent: ua ?? null,
+      deviceId: deviceId ?? null,
+    });
+  }
+
+  @Get('circles/:id/addendum/pdf')
+  async addendumPdf(
+    @CurrentMember() m: MemberPrincipal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ) {
+    sendPdf(
+      res,
+      await this.contracts.addendumPdf(m.id, id),
+      `sanad-addendum-${id.slice(0, 8)}.pdf`,
+    );
   }
 
   @Post('devices')

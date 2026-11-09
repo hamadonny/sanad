@@ -11,12 +11,12 @@ import {
 import { kwd } from './money.js';
 
 const fee: Transaction = {
-  key: 'c1:ENTRY_FEE_PAID:m1',
-  type: 'ENTRY_FEE_PAID',
+  key: 'c1:FEE_PAID:m1',
+  type: 'FEE_PAID',
   circleId: 'c1',
   entries: [
     { account: ACCOUNTS.gateway, amount: kwd(100), circleId: 'c1' },
-    { account: ACCOUNTS.entryFeesHeld('c1'), amount: -kwd(100), circleId: 'c1' },
+    { account: ACCOUNTS.feesHeld('c1'), amount: -kwd(100), circleId: 'c1' },
   ],
 };
 
@@ -25,11 +25,11 @@ describe('ledger', () => {
     const l = new Ledger();
     expect(l.post(fee)).toBe('posted');
     expect(l.balance(ACCOUNTS.gateway)).toBe(kwd(100));
-    expect(l.balance(ACCOUNTS.entryFeesHeld('c1'))).toBe(kwd(100));
-    expect(l.rawBalance(ACCOUNTS.entryFeesHeld('c1'))).toBe(-kwd(100));
+    expect(l.balance(ACCOUNTS.feesHeld('c1'))).toBe(kwd(100));
+    expect(l.rawBalance(ACCOUNTS.feesHeld('c1'))).toBe(-kwd(100));
     expect(l.balanceForCircle(ACCOUNTS.gateway, 'c1')).toBe(kwd(100));
     expect(l.balanceForCircle(ACCOUNTS.gateway, 'c2')).toBe(0n);
-    expect(l.accounts()).toEqual(['entry_fees_held:c1', 'gateway_clearing']);
+    expect(l.accounts()).toEqual(['fees_held:c1', 'gateway_clearing']);
     expect(l.has(fee.key)).toBe(true);
     l.assertBalanced();
   });
@@ -63,7 +63,7 @@ describe('ledger', () => {
       bad({
         entries: [
           { account: ACCOUNTS.gateway, amount: 0n },
-          { account: ACCOUNTS.fund, amount: 0n },
+          { account: ACCOUNTS.revenue, amount: 0n },
         ],
       }),
     ).toThrow(/LEDGER_ZERO/);
@@ -71,7 +71,7 @@ describe('ledger', () => {
       bad({
         entries: [
           { account: ACCOUNTS.gateway, amount: 2n },
-          { account: ACCOUNTS.fund, amount: -1n },
+          { account: ACCOUNTS.revenue, amount: -1n },
         ],
       }),
     ).toThrow(/LEDGER_UNBALANCED/);
@@ -80,22 +80,10 @@ describe('ledger', () => {
       bad({
         entries: [
           { account: ACCOUNTS.gateway, amount: 1n },
-          { account: ACCOUNTS.recoveries, amount: -1n },
+          { account: ACCOUNTS.receivablesControl, amount: -1n },
         ],
       }),
     ).toThrow(/cash side/);
-  });
-
-  it('never lets the fund pay for anything but advances, refunds and revenue release', () => {
-    const opCost: Transaction = {
-      key: 'x:CHARITY_TRANSFER',
-      type: 'CHARITY_TRANSFER',
-      entries: [
-        { account: ACCOUNTS.fund, amount: kwd(10) },
-        { account: ACCOUNTS.gateway, amount: -kwd(10) },
-      ],
-    };
-    expect(() => validateTransaction(opCost)).toThrow(/FUND_MISUSE/);
   });
 
   it('corrects with reversing transactions only', () => {
@@ -118,8 +106,10 @@ describe('ledger', () => {
   it('classifies accounts', () => {
     expect(accountSide(ACCOUNTS.receivable('m1'))).toBe('claims');
     expect(accountSide(ACCOUNTS.pot('c1'))).toBe('cash');
-    expect(isDebitNormal(ACCOUNTS.losses)).toBe(true);
-    expect(isDebitNormal(ACCOUNTS.fund)).toBe(false);
+    expect(isDebitNormal(ACCOUNTS.receivable('m1'))).toBe(true);
+    expect(isDebitNormal(ACCOUNTS.revenue)).toBe(false);
+    expect(isKnownAccount('fees_held:c1')).toBe(true);
+    expect(isKnownAccount('guarantee_fund')).toBe(false);
     expect(isKnownAccount('circle_pot:abc-1')).toBe(true);
     expect(isKnownAccount('circle_pot:bad id')).toBe(false);
   });

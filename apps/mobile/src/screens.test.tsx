@@ -45,7 +45,6 @@ const auction: AuctionView = {
 const options: OptionsResponse = {
   kycStatus: 'APPROVED',
   contractSigned: true,
-  circuitBreaker: 'NORMAL',
   options: [
     {
       monthly: m('100.000'),
@@ -54,14 +53,10 @@ const options: OptionsResponse = {
       members: 10,
       months: 10,
       pot: m('1000.000'),
-      entryFee: m('100.000'),
+      organizingFee: m('30.000'),
       totalContributions: m('1000.000'),
-      refundBySpot: Array.from({ length: 10 }, (_, i) => ({
-        spot: i + 1,
-        refund: m(i < 5 ? '0.000' : i < 7 ? '50.000' : '100.000'),
-      })),
       prioritySpots: [
-        { spot: 1, minBid: m('30.000'), holdback: m('100.000'), receiveAtMinBid: m('870.000') },
+        { spot: 1, minBid: m('30.000'), holdback: m('300.000'), receiveAtMinBid: m('670.000') },
       ],
       canBid: true,
     },
@@ -76,6 +71,7 @@ const contract: ContractResponse = {
   bodyEn: 'Text',
   sha256: 'x',
   signed: true,
+  legal: { contractVersion: 1, lawyerApproved: false, contractDocument: null, shariah: null },
 };
 
 jest.mock('./lib/api', () => ({
@@ -85,6 +81,9 @@ jest.mock('./lib/api', () => ({
     options: jest.fn(),
     contract: jest.fn(),
     joinQueue: jest.fn(),
+    requestSignCode: jest.fn(),
+    signContract: jest.fn(),
+    legalDocUrl: jest.fn(),
   },
   isMockCheckout: () => true,
 }));
@@ -117,7 +116,7 @@ describe('auction screen', () => {
 });
 
 describe('join calculator', () => {
-  it('shows pay, receive, fee and refunds with 3 decimals', async () => {
+  it('shows pay, receive and the organising fee with 3 decimals, and how payouts work', async () => {
     useLocalSearchParams.mockReturnValue({ monthly: '100000' });
     api.options!.mockResolvedValue(options);
     api.contract!.mockResolvedValue(contract);
@@ -125,8 +124,32 @@ describe('join calculator', () => {
     await waitFor(() =>
       expect(screen.getByTestId('calc-receive')).toHaveTextContent('1,000.000 د.ك'),
     );
-    expect(screen.getByTestId('calc-entry-fee')).toHaveTextContent('100.000 د.ك');
-    expect(screen.getAllByText('50.000 د.ك')).toHaveLength(2);
-    expect(screen.getAllByText('100.000 د.ك').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByTestId('calc-organizing-fee')).toHaveTextContent('30.000 د.ك');
+    expect(screen.getByText('كيف تُصرف المبالغ')).toBeTruthy();
+    expect(screen.queryByText(/مضمون/)).toBeNull();
+  });
+});
+
+describe('contract e-signature', () => {
+  it('agree → send signing code → sign with the code; shows placeholder + Shariah status', async () => {
+    useLocalSearchParams.mockReturnValue({ monthly: '100000' });
+    api.options!.mockResolvedValue(options);
+    api.contract!.mockResolvedValue({ ...contract, signed: false });
+    api.requestSignCode!.mockResolvedValue({ expiresIn: 300, devCode: '482913' });
+    api.signContract!.mockResolvedValue({ version: 1, documentHash: 'x', signatureId: 's1' });
+    api.joinQueue!.mockReturnValue(new Promise(() => undefined));
+    await renderWithProviders(<JoinAmount />, { language: 'en' });
+    await waitFor(() => expect(screen.getByTestId('join-continue')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('join-continue'));
+    await waitFor(() => expect(screen.getByTestId('shariah-status')).toBeTruthy());
+    expect(screen.getByText('Shariah review: not uploaded yet')).toBeTruthy();
+    expect(screen.getByText(/placeholder until the lawyer approves/)).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('contract-agree'));
+    await fireEvent.press(screen.getByTestId('contract-send-code'));
+    await waitFor(() => expect(screen.getByTestId('contract-code')).toBeTruthy());
+    expect(api.requestSignCode).toHaveBeenCalledWith(1, 'en');
+    expect(screen.getByTestId('contract-code').props.value).toBe('482913');
+    await fireEvent.press(screen.getByTestId('contract-sign'));
+    await waitFor(() => expect(api.signContract).toHaveBeenCalledWith(1, '482913'));
   });
 });

@@ -25,7 +25,7 @@ import {
 } from '@sanad/core';
 import { and, eq, sql } from 'drizzle-orm';
 import { notFound } from '../common/errors.js';
-import { bigintReplacer } from '../common/money.js';
+import { bigintReplacer, money } from '../common/money.js';
 import { ClockService } from '../common/clock.service.js';
 import { DbService, type Tx } from '../db/db.service.js';
 import {
@@ -83,6 +83,16 @@ export class CircleCommand {
     return this;
   }
 }
+
+/** Refund row kind for each REFUND_DUE reason. */
+export const REFUND_KIND: Record<string, string> = {
+  PRE_PAYOUT_DEFAULT: 'DEFAULTER',
+  EXCESS_HOLDBACK: 'HOLDBACK_EXCESS',
+  EXCESS_PAYMENT: 'EXCESS_PAYMENT',
+};
+
+/** Refund kinds the engine tracks (sending one is recorded back in the circle as REFUND_PAID). */
+export const ENGINE_REFUND_KINDS = new Set(Object.values(REFUND_KIND));
 
 const payoutDateOf = (
   config: SanadConfig,
@@ -319,18 +329,48 @@ export class CircleStore {
           })
           .onConflictDoNothing();
       }
-      if (t.type === 'ENTRY_FEE_REFUNDED') {
+      if (t.type === 'FEE_REFUNDED') {
         await tx
           .insert(refunds)
           .values({
             circleId: c,
             userId: member,
-            kind: 'ENTRY_FEE',
+            kind: 'ORGANIZING_FEE',
             amountFils: -amount,
             status: 'PENDING',
-            dedupeKey: `${c}:ENTRY_FEE:${member}`,
+            dedupeKey: t.key,
           })
           .onConflictDoNothing();
+      }
+      if (t.type === 'TOP_UP') {
+        // Money for a month that arrived after its payout, forwarded to that month's recipient.
+        await tx
+          .insert(payouts)
+          .values({
+            circleId: c,
+            userId: member,
+            kind: 'TOP_UP',
+            month: t.month ?? null,
+            amountFils: -amount,
+            status: 'PENDING',
+            dedupeKey: t.key,
+          })
+          .onConflictDoNothing();
+      }
+      if (t.type === 'REFUND_DUE') {
+        const due = -(t.entries.find((e) => e.account === 'refunds_payable')?.amount ?? 0n);
+        if (due > 0n)
+          await tx
+            .insert(refunds)
+            .values({
+              circleId: c,
+              userId: member,
+              kind: REFUND_KIND[t.memo ?? ''] ?? 'DEFAULTER',
+              amountFils: due,
+              status: 'PENDING',
+              dedupeKey: t.key,
+            })
+            .onConflictDoNothing();
       }
     }
 
@@ -349,6 +389,15 @@ export class CircleStore {
               dedupeKey: `${c}:POT:${ef.month}`,
             })
             .onConflictDoNothing();
+          break;
+        case 'TOP_UP_SENT':
+          await this.notifications.notify(
+            tx,
+            ef.memberId,
+            'payout.topup',
+            { month: ef.month, amount: money(ef.amount).kwd },
+            `${c}:payout.topup:${ef.month}:${ef.amount}:${cmd.state.seq}`,
+          );
           break;
         case 'PAYOUT_HELD':
           await this.notifications.notify(
@@ -406,19 +455,6 @@ export class CircleStore {
   private async onClosed(tx: Tx, cmd: CircleCommand): Promise<void> {
     const s = cmd.state;
     for (const m of s.members) {
-      if (m.refundDue > 0n) {
-        await tx
-          .insert(refunds)
-          .values({
-            circleId: s.circleId,
-            userId: m.memberId,
-            kind: m.status === 'DEFAULTED_PRE_PAYOUT' ? 'DEFAULTER' : 'COMPLETION',
-            amountFils: m.refundDue,
-            status: 'PENDING',
-            dedupeKey: `${s.circleId}:REFUND:${m.memberId}`,
-          })
-          .onConflictDoNothing();
-      }
       if (m.status !== 'ACTIVE') continue;
       const before = computeTier(cmd.config, await this.members.trustProfile(m.memberId, tx));
       await tx

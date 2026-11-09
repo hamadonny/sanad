@@ -2,7 +2,7 @@
  * @sanad/config — business-rule configuration (spec §5.13).
  *
  * Conventions (JSON-friendly, no floats):
- * - Whole-KWD amounts end in `Kwd` (e.g. `reserveFloorKwd: 5000`).
+ * - Whole-KWD amounts end in `Kwd` (e.g. `fastPayoutKwd: 2`).
  * - Percentages are integer **basis points** and end in `Bps` (10,000 = 100%, 500 = 5%).
  * - Durations carry their unit in the name (`Days`, `Hours`, `Minutes`, `Months`).
  *
@@ -31,9 +31,29 @@ export const circleSchema = z.object({
   firstDueAfterDrawDays: z.number().int().min(0).max(60),
 });
 
-export const entryFeeSchema = z.object({
-  /** Entry fee as a share of M. Spec: one month's contribution (10,000 bps). [SHARIAH] */
-  ofMonthlyBps: bps.min(1),
+/** Organising fee: Sanad's service fee for running the circle (D-017). [SHARIAH] */
+export const organizingFeeSchema = z.object({
+  /** Share of the pot (N × M) each member pays when joining. Launch: 3% (300 bps). */
+  ofPotBps: bps.min(1),
+});
+
+/**
+ * Additional fees (D-017 "D"). Amounts in whole KWD or bps of the pot. A fee whose feature is
+ * not live yet is still settled here so the price list is fixed before launch.
+ */
+export const feesSchema = z.object({
+  /** Paid by a member who takes over a vacated spot (on top of the catch-up months). */
+  replacementOfPotBps: bps,
+  /** Share of each amount recovered from a defaulter on the group's behalf. [SHARIAH] */
+  recoveryOfRecoveredBps: bps,
+  /** Paid by each of the two members who swap payout months. */
+  spotExchangeOfPotBps: bps,
+  /** Same-day payout instead of a standard transfer. */
+  fastPayoutKwd: z.number().int().min(0),
+  /** Setting up a private circle (friends, family, colleagues). */
+  privateCircleSetupKwd: z.number().int().min(0),
+  /** Company circles: per employee per circle, paid by the employer. */
+  companySeatKwd: z.number().int().min(0),
 });
 
 export const contributionsSchema = z.object({
@@ -54,25 +74,11 @@ export const auctionSchema = z.object({
   allowTier0Bidding: z.boolean(),
 });
 
-export const refundsSchema = z.object({
-  /** LATE-but-paid contributions allowed while still qualifying for the completion refund. */
-  maxLatePaymentsForRefund: z.number().int().min(0),
-  /** Generic rule (when no explicit table for N): share of spots, counted from the end. */
-  fullRefundSpotShareBps: bps,
-  partialRefundSpotShareBps: bps,
-  partialRefundBps: bps,
-  /**
-   * Optional explicit tables keyed by N (as a string, e.g. "10"). Value = refund bps per spot,
-   * index 0 = spot 1. Must have exactly N entries. Every value ≤ 10,000 (refund ≤ entry fee).
-   */
-  explicitTables: z.record(z.string().regex(/^\d+$/), z.array(bps)),
-});
-
 export const defaultsSchema = z.object({
   /** Deducted from a pre-payout defaulter's refunded contributions. [LEGAL][SHARIAH] */
   prePayoutDefaultPenaltyBps: bps,
-  /** Where that penalty goes. [LEGAL][SHARIAH] Defaults to charity, mirroring late penalties. */
-  prePayoutDefaultPenaltyDestination: z.enum(['charity', 'fund']),
+  /** Where that penalty goes. [LEGAL][SHARIAH] Always charity: penalties are never revenue. */
+  prePayoutDefaultPenaltyDestination: z.literal('charity'),
   banOnPrePayoutDefault: z.boolean(),
 });
 
@@ -88,7 +94,10 @@ export const tierSchema = z.object({
   maxLatePayments: z.number().int().min(0).nullable(),
   maxDefaults: z.number().int().min(0),
   maxMonthlyKwd: kwd,
-  /** Share of the pot held back on payouts for spots 1..P. */
+  /**
+   * Share of the pot held back from payouts for spots 1..P. It is the member's own money,
+   * returned at the end; if they stop paying it covers their missed months (D-017).
+   */
   holdbackBps: bps,
   /** For tier 0 this is overridden by `auction.allowTier0Bidding`. */
   canBid: z.boolean(),
@@ -97,23 +106,16 @@ export const tierSchema = z.object({
 export const riskSchema = z.object({
   tiers: z.array(tierSchema).length(3),
   maxActiveCircles: z.number().int().positive(),
-  /** Circuit breaker trips below this fund ratio (fund ÷ exposure). */
-  minFundRatioBps: z.number().int().min(0),
-  /** …and resumes at or above this one. Must be ≥ minFundRatioBps (hysteresis). */
-  resumeFundRatioBps: z.number().int().min(0),
-  reserveFloorKwd: z.number().int().min(0),
-  /** While the breaker is tripped, new circles are limited to M ≤ this. */
-  breakerMaxMonthlyKwd: kwd,
 });
 
 export const sanadConfigSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     circle: circleSchema,
-    entryFee: entryFeeSchema,
+    organizingFee: organizingFeeSchema,
+    fees: feesSchema,
     contributions: contributionsSchema,
     auction: auctionSchema,
-    refunds: refundsSchema,
     defaults: defaultsSchema,
     replacement: replacementSchema,
     risk: riskSchema,
@@ -134,17 +136,13 @@ export const sanadConfigSchema = z
     if (c.circle.payoutOffsetDays >= c.contributions.defaultThresholdDays) {
       issue(['circle', 'payoutOffsetDays'], 'payout must happen before the default threshold');
     }
-    if (c.refunds.fullRefundSpotShareBps + c.refunds.partialRefundSpotShareBps > 10_000) {
-      issue(['refunds'], 'full + partial refund spot shares cannot exceed 100%');
-    }
-    for (const [n, table] of Object.entries(c.refunds.explicitTables)) {
-      if (table.length !== Number(n)) {
-        issue(['refunds', 'explicitTables', n], `table for N=${n} must have ${n} entries`);
-      }
-    }
-    if (c.risk.resumeFundRatioBps < c.risk.minFundRatioBps) {
-      issue(['risk', 'resumeFundRatioBps'], 'resume ratio must be ≥ trip ratio');
-    }
+    // A minimum bid (share of M) plus the largest holdback (share of the pot) must leave a payout.
+    const n = c.circle.membersPerCircle;
+    const maxHoldback = Math.max(...c.risk.tiers.map((t) => t.holdbackBps));
+    c.auction.minBidBpsBySpot.forEach((b, i) => {
+      if (b + maxHoldback * n >= 10_000 * n)
+        issue(['auction', 'minBidBpsBySpot', i], 'minimum bid plus holdback leave no payout');
+    });
     c.risk.tiers.forEach((t, i) => {
       if (t.tier !== i)
         issue(['risk', 'tiers', i, 'tier'], 'tiers must be listed in order 0, 1, 2');
@@ -163,7 +161,7 @@ export type TierId = z.infer<typeof tierId>;
 
 /** Launch defaults from the spec (§5). */
 export const defaultConfig: SanadConfig = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   circle: {
     allowedMonthlyAmountsKwd: [50, 100, 250, 500],
     membersPerCircle: 10,
@@ -173,7 +171,15 @@ export const defaultConfig: SanadConfig = {
     payoutOffsetDays: 5,
     firstDueAfterDrawDays: 7,
   },
-  entryFee: { ofMonthlyBps: 10_000 },
+  organizingFee: { ofPotBps: 300 },
+  fees: {
+    replacementOfPotBps: 300,
+    recoveryOfRecoveredBps: 1_000,
+    spotExchangeOfPotBps: 100,
+    fastPayoutKwd: 2,
+    privateCircleSetupKwd: 5,
+    companySeatKwd: 1,
+  },
   contributions: { gracePeriodDays: 3, defaultThresholdDays: 15, latePenaltyBps: 0 },
   auction: {
     auctionDurationHours: 48,
@@ -181,15 +187,6 @@ export const defaultConfig: SanadConfig = {
     minIncrementBps: 500,
     antiSnipeMinutes: 5,
     allowTier0Bidding: true,
-  },
-  refunds: {
-    maxLatePaymentsForRefund: 2,
-    fullRefundSpotShareBps: 3_000,
-    partialRefundSpotShareBps: 2_000,
-    partialRefundBps: 5_000,
-    explicitTables: {
-      '10': [0, 0, 0, 0, 0, 5_000, 5_000, 10_000, 10_000, 10_000],
-    },
   },
   defaults: {
     prePayoutDefaultPenaltyBps: 0,
@@ -205,7 +202,7 @@ export const defaultConfig: SanadConfig = {
         maxLatePayments: null,
         maxDefaults: 0,
         maxMonthlyKwd: 100,
-        holdbackBps: 1_000,
+        holdbackBps: 3_000,
         canBid: false,
       },
       {
@@ -214,7 +211,7 @@ export const defaultConfig: SanadConfig = {
         maxLatePayments: 2,
         maxDefaults: 0,
         maxMonthlyKwd: 250,
-        holdbackBps: 500,
+        holdbackBps: 2_500,
         canBid: true,
       },
       {
@@ -223,15 +220,11 @@ export const defaultConfig: SanadConfig = {
         maxLatePayments: null,
         maxDefaults: 0,
         maxMonthlyKwd: 500,
-        holdbackBps: 0,
+        holdbackBps: 2_000,
         canBid: true,
       },
     ],
     maxActiveCircles: 2,
-    minFundRatioBps: 2_500,
-    resumeFundRatioBps: 3_500,
-    reserveFloorKwd: 5_000,
-    breakerMaxMonthlyKwd: 100,
   },
 };
 

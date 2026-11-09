@@ -17,11 +17,12 @@ export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: c.primary,
+        tabBarActiveTintColor: c.primaryText,
+        tabBarLabelStyle: { fontFamily: 'ReadexPro_500Medium' },
         tabBarInactiveTintColor: c.textMuted,
         tabBarStyle: { backgroundColor: c.surface, borderTopColor: c.border },
         headerStyle: { backgroundColor: c.surface },
-        headerTitleStyle: { color: c.text },
+        headerTitleStyle: { color: c.text, fontFamily: 'ReadexPro_700Bold' },
         headerTitleAlign: 'center',
       }}
     >

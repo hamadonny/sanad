@@ -20,7 +20,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import { DisbursementService } from './disbursement.service.js';
 
 export type IntentInput =
-  | { purpose: 'ENTRY_FEE'; monthlyFils: Fils }
+  | { purpose: 'ORGANIZING_FEE'; monthlyFils: Fils }
   | { purpose: 'CONTRIBUTION'; circleId: string; month: number }
   | { purpose: 'REPLACEMENT'; circleId: string; spot: number };
 
@@ -80,11 +80,11 @@ export class PaymentsService {
     let month: number | null = null;
     let spot: number | null = null;
 
-    if (input.purpose === 'ENTRY_FEE') {
+    if (input.purpose === 'ORGANIZING_FEE') {
       await this.circles.assertCanJoin(userId, input.monthlyFils);
       const { config } = await this.settings.active();
       monthly = input.monthlyFils;
-      amount = circleRules(config, monthly).entryFee;
+      amount = circleRules(config, monthly).organizingFee;
     } else if (input.purpose === 'CONTRIBUTION') {
       const { state, row, config } = await this.store.read(input.circleId);
       const me = state.members.find((m) => m.memberId === userId);
@@ -94,7 +94,7 @@ export class PaymentsService {
       if (!Number.isInteger(input.month) || input.month < 1 || input.month > state.n)
         throw unprocessable('INVALID_MONTH', 'invalid month');
       const st = slot.months[input.month];
-      if (st && !(st.state === 'ADVANCED' && st.liable === userId))
+      if (st && st.state !== 'LATE')
         throw conflict('ALREADY_PAID', `month ${input.month} is already paid`);
       monthly = state.monthly;
       const due = buildSchedule(config, row.startDate as string, state.n)[input.month - 1]!;
@@ -195,7 +195,7 @@ export class PaymentsService {
           .for('update');
         if (!p || p.status !== 'SUCCEEDED') return;
         let circleId = p.circleId;
-        if (p.purpose === 'ENTRY_FEE')
+        if (p.purpose === 'ORGANIZING_FEE')
           circleId = await this.circles.joinQueue(tx, p.userId, p.monthlyFils);
         else if (p.purpose === 'CONTRIBUTION')
           await this.circles.applyContribution(

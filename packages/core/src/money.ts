@@ -61,8 +61,8 @@ export function formatKwd(amount: Fils): string {
 
 /**
  * ROUNDING POINT: take a percentage (in basis points) of an amount, **rounding down** to the
- * nearest fils (spec §5.1). Whatever is rounded away is never paid out, so it stays in the
- * Guarantee Fund by construction.
+ * nearest fils (spec §5.1). Whatever is rounded away is simply not deducted, so it stays with
+ * the member it would have been taken from.
  *
  * @example bpsOf(kwd(100), 3_000n) // 30% of 100 KWD → 30,000 fils
  */

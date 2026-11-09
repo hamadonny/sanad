@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -71,30 +72,36 @@ export function T({
   const v: Record<Variant, TextStyle> = {
     display: {
       fontSize: typography.size.display,
-      fontWeight: typography.weight.bold,
+      fontFamily: typography.fontFamily.bold,
       color: c.primary,
     },
-    title: { fontSize: typography.size.xxl, fontWeight: typography.weight.bold, color: c.text },
-    h2: { fontSize: typography.size.lg, fontWeight: typography.weight.bold, color: c.text },
+    title: { fontSize: typography.size.xxl, fontFamily: typography.fontFamily.bold, color: c.text },
+    h2: { fontSize: typography.size.lg, fontFamily: typography.fontFamily.bold, color: c.text },
     body: {
+      fontFamily: typography.fontFamily.regular,
       fontSize: typography.size.md,
       color: c.text,
       lineHeight: typography.size.md * typography.lineHeightMultiplier,
     },
     muted: {
+      fontFamily: typography.fontFamily.regular,
       fontSize: typography.size.sm,
       color: c.textMuted,
       lineHeight: typography.size.sm * typography.lineHeightMultiplier,
     },
-    small: { fontSize: typography.size.xs, color: c.textMuted },
+    small: {
+      fontFamily: typography.fontFamily.regular,
+      fontSize: typography.size.xs,
+      color: c.textMuted,
+    },
     label: {
       fontSize: typography.size.sm,
-      fontWeight: typography.weight.medium,
+      fontFamily: typography.fontFamily.medium,
       color: c.textMuted,
     },
     money: {
       fontSize: typography.size.xl,
-      fontWeight: typography.weight.bold,
+      fontFamily: typography.fontFamily.bold,
       color: c.text,
       fontVariant: ['tabular-nums'],
     },
@@ -103,7 +110,13 @@ export function T({
     <Text
       style={[
         v[variant],
-        { textAlign: center ? 'center' : textAlign, writingDirection: rtl ? 'rtl' : 'ltr' },
+        {
+          // Native: 'auto' = the start side of the layout direction (right in Arabic). iOS treats
+          // 'left'/'right' on Text as start/end inside an RTL layout, so a physical 'right'
+          // ended up on the left. Web keeps the physical side.
+          textAlign: center ? 'center' : Platform.OS === 'web' ? textAlign : 'auto',
+          writingDirection: rtl ? 'rtl' : 'ltr',
+        },
         color ? { color } : null,
         style,
       ]}
@@ -321,9 +334,12 @@ export function Button({
     danger: c.danger,
     ghost: 'transparent',
   }[variant];
-  const fg = { primary: c.onPrimary, secondary: c.primary, danger: '#FFFFFF', ghost: c.primary }[
-    variant
-  ];
+  const fg = {
+    primary: c.onPrimary,
+    secondary: c.primaryText,
+    danger: c.onDanger,
+    ghost: c.primaryText,
+  }[variant];
   const off = disabled || loading;
   return (
     <Pressable
@@ -347,7 +363,11 @@ export function Button({
         <ActivityIndicator color={fg} />
       ) : (
         <Text
-          style={{ color: fg, fontSize: typography.size.md, fontWeight: typography.weight.bold }}
+          style={{
+            color: fg,
+            fontSize: typography.size.md,
+            fontFamily: typography.fontFamily.bold,
+          }}
         >
           {title}
         </Text>
@@ -378,6 +398,7 @@ export function Field({
             borderRadius: radii.md,
             padding: spacing.md,
             fontSize: typography.size.md,
+            fontFamily: typography.fontFamily.regular,
             color: c.text,
             textAlign,
             writingDirection: rtl ? 'rtl' : 'ltr',
@@ -514,7 +535,7 @@ export function Badge({
         style={{
           color: colorFor,
           fontSize: 12,
-          fontWeight: '600',
+          fontFamily: 'ReadexPro_500Medium',
           writingDirection: rtl ? 'rtl' : 'ltr',
         }}
       >
@@ -537,16 +558,17 @@ export function Banner({
 }) {
   const { c, spacing, radii } = useTheme();
   const bg = tone === 'primary' ? c.primary : tone === 'warning' ? c.warning : c.danger;
+  const fg = tone === 'primary' ? c.onPrimary : c.onDanger;
   return (
     <View
       style={{ backgroundColor: bg, borderRadius: radii.lg, padding: spacing.lg, gap: spacing.xs }}
       accessibilityRole="summary"
       {...(testID ? { testID } : {})}
     >
-      <T variant="h2" color="#FFFFFF">
+      <T variant="h2" color={fg}>
         {title}
       </T>
-      {body ? <T color="#FFFFFF">{body}</T> : null}
+      {body ? <T color={fg}>{body}</T> : null}
     </View>
   );
 }
@@ -571,6 +593,15 @@ export function ProgressBar({ value, label }: { value: number; label?: string })
         <View style={{ width: `${pct * 100}%`, height: 8, backgroundColor: c.primary }} />
       </View>
     </View>
+  );
+}
+
+export function ErrorText({ children }: { children: ReactNode }) {
+  const { c } = useTheme();
+  return (
+    <T color={c.danger} accessibilityLabel={typeof children === 'string' ? children : undefined}>
+      {children}
+    </T>
   );
 }
 
@@ -626,7 +657,14 @@ function OfflineBanner() {
   if (online || restoring) return null;
   return (
     <View style={{ backgroundColor: c.warning, padding: 8 }} accessibilityLiveRegion="polite">
-      <Text style={{ color: '#FFFFFF', textAlign: 'center', fontSize: 13 }}>
+      <Text
+        style={{
+          color: c.onDanger,
+          textAlign: 'center',
+          fontSize: 13,
+          fontFamily: 'ReadexPro_500Medium',
+        }}
+      >
         {t('common.offline')}
       </Text>
     </View>
@@ -648,6 +686,7 @@ export function Sheet({
   children: ReactNode;
   testID?: string;
 }) {
+  const { t } = useTranslation();
   const { c, spacing, radii } = useTheme();
   const { dir } = useDir();
   return (
@@ -655,7 +694,8 @@ export function Sheet({
       <Pressable
         style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }}
         onPress={onClose}
-        accessibilityLabel="close"
+        accessibilityRole="button"
+        accessibilityLabel={t('common.close')}
       />
       <View
         style={{

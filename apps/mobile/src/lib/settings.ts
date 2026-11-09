@@ -11,6 +11,8 @@ export interface Settings {
   biometricLock: boolean;
   seenWelcome: boolean;
   askedNotifications: boolean;
+  /** Anonymous usage counts (no personal data). On by default; can be switched off. */
+  shareUsage: boolean;
   hydrated: boolean;
   set: (patch: Partial<Omit<Settings, 'set' | 'hydrated'>>) => void;
 }
@@ -24,6 +26,7 @@ export const useSettings = create<Settings>()(
       biometricLock: true,
       seenWelcome: false,
       askedNotifications: false,
+      shareUsage: true,
       hydrated: false,
       set: (patch) => set(patch),
     }),

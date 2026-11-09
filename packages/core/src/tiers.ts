@@ -45,7 +45,6 @@ export interface JoinRequest {
   civilIdExpiry: string;
   /** YYYY-MM-DD (Asia/Kuwait). */
   today: string;
-  circuitBreakerTripped: boolean;
 }
 
 export type JoinBlocker =
@@ -55,8 +54,7 @@ export type JoinBlocker =
   | 'CIVIL_ID_EXPIRED'
   | 'AMOUNT_NOT_OFFERED'
   | 'AMOUNT_ABOVE_TIER'
-  | 'TOO_MANY_ACTIVE_CIRCLES'
-  | 'PAUSED_BY_CIRCUIT_BREAKER';
+  | 'TOO_MANY_ACTIVE_CIRCLES';
 
 /** All reasons a member cannot join a circle of `monthly`; empty = may join. */
 export function joinBlockers(config: SanadConfig, req: JoinRequest): JoinBlocker[] {
@@ -71,8 +69,5 @@ export function joinBlockers(config: SanadConfig, req: JoinRequest): JoinBlocker
     out.push('AMOUNT_ABOVE_TIER');
   }
   if (req.activeCircles >= config.risk.maxActiveCircles) out.push('TOO_MANY_ACTIVE_CIRCLES');
-  if (req.circuitBreakerTripped && req.monthly > kwd(config.risk.breakerMaxMonthlyKwd)) {
-    out.push('PAUSED_BY_CIRCUIT_BREAKER');
-  }
   return out;
 }

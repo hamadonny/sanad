@@ -8,7 +8,6 @@ export * from './errors.js';
 export * from './json.js';
 export * from './ledger.js';
 export * from './money.js';
-export * from './risk.js';
 export * from './rules.js';
 export * from './scenario.js';
 export * from './schedule.js';

@@ -3,6 +3,7 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
+import { AddendumCard } from '../../../components/AddendumCard';
 import { PaymentSheet, type PaymentRequest } from '../../../components/PaymentSheet';
 import {
   Badge,
@@ -26,15 +27,14 @@ import { useTheme } from '../../../lib/theme';
 
 const TONE: Record<string, 'good' | 'warn' | 'bad' | 'neutral' | 'primary'> = {
   PAID: 'good',
-  REPAID: 'good',
-  ADVANCED: 'warn',
+  LATE: 'bad',
+  COVERED: 'warn',
   UNPAID: 'neutral',
   WAIVED: 'neutral',
   PAID_OUT: 'good',
   UPCOMING: 'neutral',
   HELD: 'warn',
-  VACANT: 'bad',
-  RETURNED_TO_FUND: 'neutral',
+  VACANT: 'neutral',
 };
 
 export default function CircleDetailScreen() {
@@ -62,9 +62,8 @@ export default function CircleDetailScreen() {
   if (!q.data) return <ErrorView error={q.error} onRetry={() => void q.refetch()} />;
   const d = q.data;
   const me = d.me;
-  const late = me?.payments.some((p) => p.status === 'ADVANCED');
-  const payable =
-    me?.payments.filter((p) => p.status === 'UNPAID' || p.status === 'ADVANCED') ?? [];
+  const late = me?.payments.some((p) => p.status === 'LATE');
+  const payable = me?.payments.filter((p) => p.status === 'UNPAID' || p.status === 'LATE') ?? [];
   const canPay = d.status === 'ACTIVE' || d.status === 'CLOSING';
   const nextMonth = payable[0]?.month;
   const aheadMonth = payable[1]?.month;
@@ -107,6 +106,10 @@ export default function CircleDetailScreen() {
         />
       ) : null}
 
+      {['ACTIVE', 'CLOSING', 'CLOSED'].includes(d.status) && me ? (
+        <AddendumCard circleId={id} />
+      ) : null}
+
       {late ? (
         <Card tone="warning">
           <T>{t('circle.lateNote')}</T>
@@ -117,7 +120,7 @@ export default function CircleDetailScreen() {
         <Card tone="primary">
           <KeyValue label={t('circle.mySpotLabel')} value={f.num(me.spot)} strong />
           <KeyValue
-            label={t('circle.expectedPayout')}
+            label={me.payoutAmount.fils !== '0' ? t('circle.received') : t('circle.expectedPayout')}
             value={f.money(me.payoutAmount.fils !== '0' ? me.payoutAmount : me.expectedPayout)}
             strong
             testID="expected-payout"
@@ -128,8 +131,8 @@ export default function CircleDetailScreen() {
           {me.holdbackHeld.fils !== '0' ? (
             <KeyValue label={t('circle.holdback')} value={f.money(me.holdbackHeld)} />
           ) : null}
-          {me.expectedRefund.fils !== '0' ? (
-            <KeyValue label={t('circle.refund')} value={f.money(me.expectedRefund)} />
+          {me.owed.fils !== '0' ? (
+            <KeyValue label={t('circle.owed')} value={f.money(me.owed)} />
           ) : null}
         </Card>
       ) : null}
@@ -183,7 +186,7 @@ export default function CircleDetailScreen() {
                 {i > 0 ? <Divider /> : null}
                 <Row>
                   <View style={{ flexShrink: 1 }}>
-                    <T variant={r.isMe ? 'h2' : 'body'} color={r.isMe ? c.primary : undefined}>
+                    <T variant={r.isMe ? 'h2' : 'body'} color={r.isMe ? c.primaryText : undefined}>
                       {t('common.month', { n: f.num(r.month) })} ·{' '}
                       {r.isMe ? t('circle.you') : (r.receiver ?? '—')}
                     </T>
@@ -212,7 +215,7 @@ export default function CircleDetailScreen() {
       />
 
       <Sheet visible={leaving} onClose={() => setLeaving(false)} title={t('join.leave')}>
-        <T>{t('join.leaveConfirm', { amount: f.money(me?.entryFeePaid ?? '0.000', false) })}</T>
+        <T>{t('join.leaveConfirm', { amount: f.money(me?.organizingFeePaid ?? '0.000', false) })}</T>
         {leave.error ? <T color={c.danger}>{errorMessage(t, leave.error)}</T> : null}
         <Button
           title={t('common.confirm')}

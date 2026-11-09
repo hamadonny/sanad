@@ -10,7 +10,7 @@ export interface ActiveConfig {
   config: SanadConfig;
 }
 
-/** Versioned business config (spec §5.13) and small system state (e.g. circuit breaker). */
+/** Versioned business config (spec §5.13) and small system state (e.g. job markers). */
 @Injectable()
 export class SettingsService {
   private readonly cache = new Map<number, SanadConfig>();

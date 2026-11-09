@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next';
 import { PaymentSheet, type PaymentRequest } from '../../components/PaymentSheet';
 import {
   Badge,
-  Banner,
   Button,
   Card,
   ErrorView,
@@ -36,9 +35,6 @@ export default function JoinTab() {
         <Card tone="warning" onPress={() => router.push('/kyc')}>
           <T variant="h2">{t('join.lockReasons.IDENTITY_NOT_VERIFIED')}</T>
         </Card>
-      ) : null}
-      {o.circuitBreaker === 'TRIPPED' ? (
-        <Banner tone="warning" title={t('join.lockReasons.PAUSED_BY_CIRCUIT_BREAKER')} />
       ) : null}
       <T variant="title">{t('join.chooseAmount')}</T>
       {o.options.map((opt) => (

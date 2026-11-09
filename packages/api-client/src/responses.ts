@@ -16,6 +16,14 @@ export interface TokenPair {
   expiresIn: number;
 }
 
+export interface OtpRequestResponse {
+  expiresIn: number;
+  /** Development only (mock SMS): the code that was "sent". Never present in production. */
+  devCode?: string;
+  /** Development only: this phone signs in with `devLogin()`, no code needed. */
+  devLogin?: boolean;
+}
+
 export interface OtpVerifyResponse extends TokenPair {
   userId: string;
   isNew: boolean;
@@ -67,6 +75,8 @@ export interface ContractResponse {
   bodyEn: string;
   sha256: string;
   signed: boolean;
+  /** Lawyer / Shariah review status of this contract [LEGAL][SHARIAH]. */
+  legal: LegalStatus;
 }
 
 export interface CircleOption {
@@ -76,9 +86,9 @@ export interface CircleOption {
   members: number;
   months: number;
   pot: ApiMoney;
-  entryFee: ApiMoney;
+  /** One-time organising fee (D-017: 3% of the pot), refunded if the circle never starts. */
+  organizingFee: ApiMoney;
   totalContributions: ApiMoney;
-  refundBySpot: { spot: number; refund: ApiMoney }[];
   prioritySpots: {
     spot: number;
     minBid: ApiMoney;
@@ -91,7 +101,6 @@ export interface CircleOption {
 export interface OptionsResponse {
   kycStatus: string;
   contractSigned: boolean;
-  circuitBreaker: 'NORMAL' | 'TRIPPED';
   options: CircleOption[];
 }
 
@@ -112,7 +121,12 @@ export interface CircleSummary {
   auctionEndsAt: string | null;
 }
 
-export type InstallmentState = 'UNPAID' | 'PAID' | 'ADVANCED' | 'REPAID' | 'WAIVED';
+/**
+ * UNPAID: not paid yet. LATE: its month was paid out without it, still owed.
+ * COVERED: the member defaulted; the month was (partly) covered from their holdback or spot.
+ * WAIVED: a vacated spot's own month.
+ */
+export type InstallmentState = 'UNPAID' | 'PAID' | 'LATE' | 'COVERED' | 'WAIVED';
 
 export interface CircleDetail extends CircleSummary {
   configVersion: number;
@@ -123,7 +137,8 @@ export interface CircleDetail extends CircleSummary {
     payoutDate: string | null;
     receiver: string | null;
     isMe: boolean;
-    status: 'PAID_OUT' | 'UPCOMING' | 'HELD' | 'VACANT' | 'RETURNED_TO_FUND';
+    /** VACANT: a vacated spot's month, shared out to repair the months it missed. */
+    status: 'PAID_OUT' | 'UPCOMING' | 'HELD' | 'VACANT';
   }[];
   me: {
     status: string;
@@ -131,13 +146,13 @@ export interface CircleDetail extends CircleSummary {
     bid: ApiMoney;
     holdbackHeld: ApiMoney;
     payoutAmount: ApiMoney;
-    /** Pot − bid − holdback: what this member will receive in their month. */
+    /** Pot − bid − holdback if everyone pays: what this member receives in their month. */
     expectedPayout: ApiMoney;
-    entryFeePaid: ApiMoney;
+    organizingFeePaid: ApiMoney;
     latePayments: number;
+    /** Months this member still owes (late), or the open claim after a default. */
+    owed: ApiMoney;
     refundDue: ApiMoney;
-    /** Completion refund this member earns if they finish in good standing. */
-    expectedRefund: ApiMoney;
     payments: { month: number; dueDate: string; amount: ApiMoney; status: InstallmentState }[];
   } | null;
 }
@@ -189,11 +204,13 @@ export interface ReplacementOffer {
   spot: number;
   monthly: ApiMoney;
   payNow: ApiMoney;
+  catchUp: ApiMoney;
+  replacementFee: ApiMoney;
   available: boolean;
   blockers: string[];
 }
 
-export type PaymentPurpose = 'ENTRY_FEE' | 'CONTRIBUTION' | 'REPLACEMENT';
+export type PaymentPurpose = 'ORGANIZING_FEE' | 'CONTRIBUTION' | 'REPLACEMENT';
 export type PaymentStatus =
   'PENDING' | 'SUCCEEDED' | 'APPLIED' | 'FAILED' | 'REFUND_REQUIRED' | 'REFUNDED';
 
@@ -229,4 +246,72 @@ export interface NotificationView {
 export interface ApiErrorBody {
   code: string;
   message: string;
+}
+
+/** Founder-uploaded legal document (lawyer's contract or Shariah review). */
+export interface LegalDocument {
+  id: string;
+  kind: string;
+  contractVersion: number | null;
+  title: string;
+  reviewer: string | null;
+  reviewedOn: string | null;
+  status: string;
+  notes: string | null;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  createdAt: string;
+}
+
+/** Legal review status shown to members and printed on contracts [LEGAL][SHARIAH]. */
+export interface LegalStatus {
+  contractVersion: number;
+  /** The lawyer's final contract has been uploaded for the current version. */
+  lawyerApproved: boolean;
+  contractDocument: { id: string; title: string; uploadedAt: string } | null;
+  shariah: {
+    id: string;
+    status: string;
+    reviewer: string | null;
+    reviewedOn: string | null;
+    title: string;
+    /** Members can download it (approved reviews only). */
+    downloadable: boolean;
+  } | null;
+}
+
+export interface SignatureView {
+  id: string;
+  kind: 'MEMBERSHIP' | 'ADDENDUM' | string;
+  contractVersion: number | null;
+  circleId: string | null;
+  documentHash: string;
+  signedAt: string;
+  hasPdf: boolean;
+}
+
+export interface AddendumView {
+  circleId: string;
+  spot: number;
+  months: number;
+  monthly: ApiMoney;
+  pot: ApiMoney;
+  bid: ApiMoney;
+  holdback: ApiMoney;
+  holdbackPct: number;
+  expectedPayout: ApiMoney;
+  payoutDate: string;
+  schedule: {
+    month: number;
+    dueDate: string;
+    payoutDate: string;
+    amount: ApiMoney;
+    recipientSpot: number;
+  }[];
+  documentHash: string;
+  acknowledged: boolean;
+  acknowledgedAt: string | null;
+  signatureId: string | null;
 }

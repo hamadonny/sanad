@@ -1,0 +1,6 @@
+{
+  "CFBundleDisplayName": "Sanad",
+  "NSFaceIDUsageDescription": "Sanad uses Face ID to lock the app and confirm payments and bids.",
+  "NSCameraUsageDescription": "Sanad needs the camera to photograph your Civil ID and a selfie to verify your identity.",
+  "NSPhotoLibraryUsageDescription": "To choose a photo of your Civil ID."
+}
